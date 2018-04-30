@@ -4,16 +4,12 @@
     "repository": "https://github.com/user/project.git",
     "license": "BSD3",
     "source-directories": [
-<<<<<<< HEAD
-        "src"
-=======
+        "src",
         "."
->>>>>>> edec9f17a5eec2765ba00207c6712a613b4ed506
     ],
     "exposed-modules": [],
     "dependencies": {
         "NoRedInk/elm-decode-pipeline": "3.0.0 <= v < 4.0.0",
-<<<<<<< HEAD
         "elm-community/json-extra": "2.1.0 <= v < 3.0.0",
         "elm-community/string-extra": "1.4.0 <= v < 2.0.0",
         "elm-lang/core": "5.1.1 <= v < 6.0.0",
@@ -27,14 +23,12 @@
         "lukewestby/elm-http-builder": "5.1.0 <= v < 6.0.0",
         "mgold/elm-date-format": "1.3.0 <= v < 2.0.0",
         "rtfeldman/elm-validate": "2.0.0 <= v < 3.0.0",
-        "rtfeldman/selectlist": "1.0.0 <= v < 2.0.0"
-=======
+        "rtfeldman/selectlist": "1.0.0 <= v < 2.0.0",
         "elm-lang/core": "5.0.0 <= v < 6.0.0",
         "elm-lang/html": "2.0.0 <= v < 3.0.0",
         "elm-lang/http": "1.0.0 <= v < 2.0.0",
         "lukewestby/elm-http-builder": "5.2.0 <= v < 6.0.0",
         "truqu/elm-base64": "2.0.3 <= v < 3.0.0"
->>>>>>> edec9f17a5eec2765ba00207c6712a613b4ed506
     },
     "elm-version": "0.18.0 <= v < 0.19.0"
 }
