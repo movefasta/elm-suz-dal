@@ -39,7 +39,8 @@ removeUTFControlChars a b =
 viewLink : Link -> Html Msg
 viewLink link =
     div [] [ a [ onClick <| Msgs.GetObjectRequest link.hash ] 
-            [ text ( link.name ++ "  " ++ toString link.size ) ] ]
+            [ text ( link.name ++ "  " ++ toString link.size ) ],
+            Html.button [ onClick <| Msgs.RemoveLink link ] [ text "del" ] ]
 
 maybeRemote : ( a -> Html Msg ) -> WebData a -> Html Msg
 maybeRemote viewFunction response =

@@ -9,6 +9,8 @@ type Msg
     | UpdateData Data
     | GetObjectRequest Hash
     | SetDataRequest
+    | RemoveLink Link
+    | GetModifiedObject (WebData Hash)
     | GetObject (WebData Object)
     | GetIpfsHash (WebData Hash)
     | UpdatePureData (WebData String)

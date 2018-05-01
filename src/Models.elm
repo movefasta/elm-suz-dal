@@ -48,7 +48,7 @@ initModel : Model
 initModel =
   Model
     RemoteData.Loading
-    "QmaHzKAq5XbJXbNS7PHwdHw35eU6fwHBmrC5eA5uSbdcyC"
+    "QmUuGJ2gVET4JycdoJTGVk8VYHiRpf3B8WRhqWwiFG2idZ"
     ""
     RemoteData.Loading
     RemoteData.Loading

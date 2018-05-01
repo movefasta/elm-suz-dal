@@ -41,6 +41,12 @@ setData data hash =
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.GetIpfsHash
 
+removeLink : Hash -> Link -> Cmd Msg
+removeLink hash link =
+    Http.get ( ipfsApiUrl ++ "object/patch/rm-link?arg=" ++ hash ++ "&arg=" ++ link.name ) onlyHashDecoder
+        |> RemoteData.sendRequest
+        |> Cmd.map Msgs.GetModifiedObject
+
 {-
 get : Hash -> Cmd Msg
 get hash =
@@ -75,6 +81,10 @@ stringtoBody value =
 
 -- DECODERS
 
+onlyHashDecoder : Decode.Decoder Hash
+onlyHashDecoder =
+    Decode.field "Hash" Decode.string
+
 
 objectModifiedDecoder : Decode.Decoder ModifiedObject
 objectModifiedDecoder =
@@ -108,3 +118,4 @@ headerDecoder =
     decode ModifiedObject
         |> required "Ipfs-Hash" Decode.string
         |> hardcoded []
+
