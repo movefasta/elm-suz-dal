@@ -1,6 +1,6 @@
 module Msgs exposing (..)
 
-import Models exposing (Hash, Object, ModifiedObject, Link, Data, File)
+import Models exposing (Name, Hash, Object, ModifiedObject, Link, Data, File)
 -- import Navigation exposing (Location)
 import RemoteData exposing (WebData)
 
@@ -10,6 +10,7 @@ type Msg
     | GetObjectRequest Hash
     | SetDataRequest
     | RemoveLink Link
+    | AddLink Name Hash
     | GetModifiedObject (WebData Hash)
     | GetObject (WebData Object)
     | GetIpfsHash (WebData Hash)

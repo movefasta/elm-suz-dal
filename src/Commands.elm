@@ -4,7 +4,7 @@ import Http
 import Json.Decode as Decode
 import Json.Decode.Pipeline exposing (decode, required, hardcoded)
 import Msgs exposing (Msg)
-import Models exposing (Hash, Object, ModifiedObject, Link)
+import Models exposing (Name, Hash, Object, ModifiedObject, Link)
 import RemoteData
 import Result
 import Dict
@@ -43,9 +43,23 @@ setData data hash =
 
 removeLink : Hash -> Link -> Cmd Msg
 removeLink hash link =
-    Http.get ( ipfsApiUrl ++ "object/patch/rm-link?arg=" ++ hash ++ "&arg=" ++ link.name ) onlyHashDecoder
+    Http.get ( ipfsApiUrl 
+        ++ "object/patch/rm-link?arg=" ++ hash 
+        ++ "&arg=" ++ link.name ) onlyHashDecoder
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.GetModifiedObject
+
+
+addLink : Hash -> Name -> Hash -> Cmd Msg
+addLink node_hash name link_hash =
+    Http.get ( ipfsApiUrl
+        ++ "object/patch/add-link?arg=" ++ node_hash 
+        ++ "&arg=" ++ link_hash 
+        ++ "&arg=" ++ name ) onlyHashDecoder
+        |> RemoteData.sendRequest
+        |> Cmd.map Msgs.GetModifiedObject
+
+
 
 {-
 get : Hash -> Cmd Msg

@@ -1,24 +1,64 @@
 module View exposing (..)
 
-import Html exposing (program, text, div, input, button, p, h3, a, Html)
-import Html.Attributes exposing (href, value, attribute, width, style, downloadAs)
+import Html exposing (..)
+import Html.Attributes exposing (..)
 import Html.Events exposing (..)
-import Models exposing (Model, Hash, Object, Link)
+import Models exposing (..)
 import Msgs exposing (Msg)
 import RemoteData exposing (WebData)
 import Json.Decode as Decode
 import String.Extra exposing (toCodePoints, fromCodePoints)
 
+
 view : Model -> Html Msg
 view model =
-  div []
-    [ input [ onInput Msgs.UpdateQuery, value model.hash ] []
-    , button [ onClick <| Msgs.GetObjectRequest model.hash ] [ text "Get Object Data" ]
-    , input [ onInput Msgs.UpdateData, value model.data, onEnter Msgs.SetDataRequest ] []
-    , button [ onClick Msgs.SetDataRequest ] [ text "Set Object Data" ]
-    , div [] [ maybeRemote text model.headers ]
-    , div [] [ maybeRemote viewObject model.object ]
-    ]
+    case model.currentRoute of
+        HashRoute hash -> 
+            div [] [ viewControls model ]
+
+        LinkRoute hash name ->
+            case findLinkByName name model.object of
+                Just link ->
+                    div [] [ maybeRemote viewObject model.object ]
+
+                Nothing ->
+                    notFoundView
+
+        NotFoundRoute ->
+            notFoundView
+
+
+findLinkByName : Name -> WebData Object -> Maybe Link
+findLinkByName link_name object =
+    case RemoteData.toMaybe object of
+        Just object ->
+            object.links
+                |> List.filter (\link -> link.name == link_name)
+                |> List.head
+
+        Nothing ->
+            Nothing
+
+
+notFoundView : Html msg
+notFoundView =
+    h3 [] [ text "Oops! The page you requested was not found!" ]
+
+
+viewControls : Model -> Html Msg
+viewControls model =
+    div []
+        [ input [ onInput Msgs.UpdateQuery, value model.hash ] []
+        , button [ onClick <| Msgs.GetObjectRequest model.hash ] [ text "Get Object Data" ]
+        , input [ onInput Msgs.UpdateData, value model.data, onEnter Msgs.SetDataRequest ] []
+        , button [ onClick Msgs.SetDataRequest ] [ text "Set Object Data" ]
+        ]
+
+
+viewPureData : String -> Html Msg
+viewPureData data =
+    iframe [ srcdoc data, style [("height", "100%")] ] [] 
+
 
 viewObject : Object -> Html Msg
 viewObject object =
@@ -38,9 +78,24 @@ removeUTFControlChars a b =
 
 viewLink : Link -> Html Msg
 viewLink link =
+    tr []
+        [ td []
+            [ a [ onClick <| Msgs.GetObjectRequest link.hash ] [ text link.name ] ]
+        , td []
+            [ text ( link.name ++ "  " ++ toString link.size ) ]
+        , td []
+            [ a [ onClick <| Msgs.RemoveLink link ] [ text "rm-link" ] ]
+        , td []
+            [ text <| link.hash ]
+        ]
+
+{-
+viewLink : Link -> Html Msg
+viewLink link =
     div [] [ a [ onClick <| Msgs.GetObjectRequest link.hash ] 
             [ text ( link.name ++ "  " ++ toString link.size ) ],
             Html.button [ onClick <| Msgs.RemoveLink link ] [ text "del" ] ]
+-}
 
 maybeRemote : ( a -> Html Msg ) -> WebData a -> Html Msg
 maybeRemote viewFunction response =
@@ -78,60 +133,3 @@ listUnicodeCodes data =
 intToStringFoldFun: Int -> String -> String
 intToStringFoldFun a b =
     ( toString a ) ++ ", " ++ b
-
-
-
-{-
-
-view : Model -> Html Msg
-view model =
-    div []
-        [ page model ]
-
-
-page : Model -> Html Msg
-page model =
-    case model.route of
-        Models.PlayersRoute ->
-            Players.List.view model.players
-
-        Models.PlayerRoute id ->
-            playerEditPage model id
-
-        Models.NotFoundRoute ->
-            notFoundView
-
-
-playerEditPage : Model -> PlayerId -> Html Msg
-playerEditPage model playerId =
-    case model.players of
-        RemoteData.NotAsked ->
-            text ""
-
-        RemoteData.Loading ->
-            text "Loading ..."
-
-        RemoteData.Success players ->
-            let
-                maybePlayer =
-                    players
-                        |> List.filter (\player -> player.id == playerId)
-                        |> List.head
-            in
-                case maybePlayer of
-                    Just player ->
-                        Players.Edit.view player
-
-                    Nothing ->
-                        notFoundView
-
-        RemoteData.Failure err ->
-            text (toString err)
-
-
-notFoundView : Html msg
-notFoundView =
-    div []
-        [ text "Not found"
-        ]
--}

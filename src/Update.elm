@@ -1,6 +1,6 @@
 module Update exposing (..)
 
-import Commands exposing (setData, getObject, getPureData, removeLink)
+import Commands exposing (setData, getObject, getPureData, removeLink, addLink)
 import Models exposing (Model)
 import Msgs exposing (Msg)
 -- import Routing exposing (parseLocation)
@@ -19,17 +19,22 @@ update msg model =
         ( model, setData model.data model.hash )
 
     Msgs.GetObjectRequest hash ->
-        ( model, getObject hash )
+        ( { model | hash = hash }, Cmd.batch [ getObject hash, getPureData hash ] )
 
     Msgs.GetObject response ->
         ( { model | object = response }, Cmd.none )
 
     Msgs.GetModifiedObject response ->
-        ( { model | hash = RemoteData.withDefault "" response }, getObject <| model.hash )
+        let
+            ipfs_hash = RemoteData.withDefault "" response
+        
+        in        
+            ( { model | hash = ipfs_hash }, getObject <| ipfs_hash )
 
     Msgs.GetIpfsHash response ->
         let
             ipfs_hash = RemoteData.withDefault "" response
+
         in
             ( { model | headers = response, hash = ipfs_hash }, getObject <| ipfs_hash )
 
@@ -39,6 +44,8 @@ update msg model =
     Msgs.RemoveLink link ->
         ( model, removeLink model.hash link )
 
+    Msgs.AddLink name hash ->
+       ( model, addLink model.hash name hash )
 {-
 updatedLinks = { response | links = List.filter (\x -> x.name /= link.name) response.links }
 

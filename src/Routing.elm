@@ -8,9 +8,8 @@ import UrlParser exposing (..)
 matchers : Parser (Route -> a) a
 matchers =
     oneOf
-        [ map PlayersRoute top
-        , map PlayerRoute (s "players" </> string)
-        , map PlayersRoute (s "players")
+        [ map LinkRoute (s "ipfs" </> string </> string)
+        , map HashRoute (s "ipfs" </> string)
         ]
 
 
@@ -24,12 +23,11 @@ parseLocation location =
             NotFoundRoute
 
 
-playersPath : String
-playersPath =
-    "#players"
+objectPath : String
+objectPath =
+    "ipfs"
 
 
-
-playerPath : PlayerId -> String
-playerPath id =
-    "#players/" ++ id
+linkPath : Hash -> Name -> String
+linkPath hash name =
+    "ipfs" ++ hash ++ name

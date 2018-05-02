@@ -2,6 +2,31 @@ module Models exposing (..)
 
 import RemoteData exposing (WebData)
 
+
+initModel : Route -> Model
+initModel route =
+    { object = RemoteData.Loading
+    , hash = "QmUuGJ2gVET4JycdoJTGVk8VYHiRpf3B8WRhqWwiFG2idZ"
+    , data = ""
+    , headers = RemoteData.NotAsked
+    , pure_data = RemoteData.Loading
+    , currentRoute = route
+    }
+
+type alias Model =
+  { object : WebData Object
+  , hash : Hash
+  , data : String
+  , headers : WebData Hash
+  , pure_data : WebData String
+  , currentRoute : Route
+  }
+
+type Route
+    = HashRoute Hash
+    | LinkRoute Hash Name
+    | NotFoundRoute
+
 type alias Hash =
     String
 
@@ -14,10 +39,13 @@ type alias File =
 type alias Header =
     { hash : Hash }
 
+type alias Name =
+    String
+
 -- модель ссылки IPFS
 
 type alias Link =
-    { name : String
+    { name : Name
     , hash : Hash
     , size : Int
     }
@@ -36,22 +64,7 @@ type alias ModifiedObject =
     , links : List Link
     }
 
-type alias Model =
-  { object : WebData Object
-  , hash : Hash
-  , data : String
-  , headers : WebData Hash
-  , pure_data : WebData String
-  }
 
-initModel : Model
-initModel =
-  Model
-    RemoteData.Loading
-    "QmUuGJ2gVET4JycdoJTGVk8VYHiRpf3B8WRhqWwiFG2idZ"
-    ""
-    RemoteData.Loading
-    RemoteData.Loading
 {-
 
 type alias Model =
@@ -65,11 +78,4 @@ initialModel route =
     { players = RemoteData.Loading
     , route = route
     }
-
-
-type Route
-    = PlayersRoute
-    | PlayerRoute PlayerId
-    | NotFoundRoute
-
 -}
