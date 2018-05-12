@@ -3,44 +3,24 @@ module Models exposing (..)
 import RemoteData exposing (WebData)
 
 
-initModel : Route -> Model
-initModel route =
-    { object = RemoteData.Loading
-    , hash = "QmUuGJ2gVET4JycdoJTGVk8VYHiRpf3B8WRhqWwiFG2idZ"
-    , data = ""
-    , headers = RemoteData.NotAsked
-    , pure_data = RemoteData.Loading
-    , currentRoute = route
+type alias Model =
+    { object : WebData Object
+    , hash : Hash
+    , data : String
+    , headers : WebData Hash
+    , pure_data : WebData String
+    , path : List Node
     }
 
-type alias Model =
-  { object : WebData Object
-  , hash : Hash
-  , data : String
-  , headers : WebData Hash
-  , pure_data : WebData String
-  , currentRoute : Route
-  }
+type alias Node =
+    ( Name, Hash )
 
-type Route
-    = HashRoute Hash
-    | LinkRoute Hash Name
-    | NotFoundRoute
+-- модель объекта IPFS, приходит в ответ на запрос object get 
 
-type alias Hash =
-    String
-
-type alias Data =
-    String
-
-type alias File =
-    String
-
-type alias Header =
-    { hash : Hash }
-
-type alias Name =
-    String
+type alias Object =
+    { data : Data
+    , links : List Link
+    }
 
 -- модель ссылки IPFS
 
@@ -50,12 +30,12 @@ type alias Link =
     , size : Int
     }
 
--- модель объекта IPFS, приходит в ответ на запрос object get 
+type alias Header =
+    { hash : Hash }
 
-type alias Object =
-    { data : Data
-    , links : List Link
-    }
+type LinkType 
+    = Folder
+    | File
 
 -- ModifiedObject приходит в ответ на запросы object put/patch(все)/new/links
 
@@ -64,18 +44,16 @@ type alias ModifiedObject =
     , links : List Link
     }
 
+-- Alias of basic types
 
-{-
+type alias Hash =
+    String
 
-type alias Model =
-    { players : WebData (List Player)
-    , route : Route
-    }
+type alias Name =
+    String
 
+type alias Data =
+    String
 
-initialModel : Route -> Model
-initialModel route =
-    { players = RemoteData.Loading
-    , route = route
-    }
--}
+type alias Level =
+    Int

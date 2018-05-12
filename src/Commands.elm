@@ -4,7 +4,7 @@ import Http
 import Json.Decode as Decode
 import Json.Decode.Pipeline exposing (decode, required, hardcoded)
 import Msgs exposing (Msg)
-import Models exposing (Name, Hash, Object, ModifiedObject, Link)
+import Models exposing (Node, LinkType, Name, Hash, Object, ModifiedObject, Link)
 import RemoteData
 import Result
 import Dict
@@ -21,6 +21,30 @@ ipfsGatewayUrl =
     "http://localhost:8080/ipfs/"
 
 
+pathForUrl : List Node -> String
+pathForUrl path = 
+    List.foldr (\( name, hash ) list -> (name ++ "/") ++ list) "" path
+
+
+pathUpdate : Node -> List Node -> List Node -> List Node
+pathUpdate node acc path =
+    case path of
+        x :: xs -> 
+            case x == node of
+                True -> 
+                    acc ++ [x]
+                False -> 
+                    pathUpdate node (acc ++ [x]) xs 
+        [] -> acc ++ [node]
+
+{-|
+rootHashUpdate : Node -> List Node -> List Node -> List Node
+rootHashUpdate node acc path =
+    case List.reverse path of
+        x :: xs ->
+            case 
+
+-}
 getPureData : Hash -> Cmd Msg
 getPureData hash =
     Http.getString ( ipfsGatewayUrl ++ hash )
@@ -41,6 +65,7 @@ setData data hash =
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.GetIpfsHash
 
+
 removeLink : Hash -> Link -> Cmd Msg
 removeLink hash link =
     Http.get ( ipfsApiUrl 
@@ -59,15 +84,6 @@ addLink node_hash name link_hash =
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.GetModifiedObject
 
-
-
-{-
-get : Hash -> Cmd Msg
-get hash =
-    Http.getString (ipfsApiUrl ++ "get?arg=" ++ hash)
-        |> RemoteData.sendRequest
-        |> Cmd.map Msgs.Download
--}
 
 put : String -> String -> Http.Request String
 put url text =
@@ -132,4 +148,3 @@ headerDecoder =
     decode ModifiedObject
         |> required "Ipfs-Hash" Decode.string
         |> hardcoded []
-
