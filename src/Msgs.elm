@@ -14,4 +14,5 @@ type Msg
     | GetModifiedObject (WebData Hash)
     | GetObject (WebData Object)
     | GetIpfsHash (WebData Hash)
-    | UpdatePureData (WebData String)
+    | UpdatePureData (WebData String) Link
+    | GetData Hash

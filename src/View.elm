@@ -1,6 +1,6 @@
 module View exposing (..)
 
-import Html exposing (Html, div, tr, td, a, input, iframe, text)
+import Html exposing (Html)
 import Html.Events exposing (..)
 import Models exposing (..)
 import Msgs exposing (Msg)
@@ -27,9 +27,9 @@ view model =
             []
             [ E.el None [ center, width (px 800) ] <|
                 E.column Main
-                    [ spacing 50, paddingTop 50, paddingBottom 50 ]
+                    [ spacing 20 ]
                     [ viewControls model
-                    , E.html <| viewPath model.path
+                    , viewPath model.path
                     , maybeRemote viewObject model.object
                     ]
             ]
@@ -37,7 +37,7 @@ view model =
 
 viewObject : Object -> Element Styles variation Msg
 viewObject object =
-    E.column Main [] <|
+    E.column Main [ spacing 5 ] <|
         List.concat 
         [ [ toCodePoints object.data
                     |> List.foldr removeUTFControlChars []
@@ -47,60 +47,72 @@ viewObject object =
         ]
 
 
-viewPath : List Node -> Html Msg
+viewLink : Link -> Element Styles variation Msg
+viewLink link =
+    E.row Main [ spacing 5 ] 
+        [ E.button None
+            [ padding 5
+            , Event.onClick <| Msgs.GetObjectRequest link.name link.hash
+            ]
+            <| E.text link.name
+        , E.button None
+            [ padding 5
+            , Event.onClick <| Msgs.GetData link.hash
+            ]
+            <| E.text link.data
+        , E.button None
+            [ padding 5
+            , Event.onClick <| Msgs.RemoveLink link
+            ]
+            <| E.text "Удалить"
+
+        ]
+
+
+viewPath : List Node -> Element Styles variation Msg
 viewPath path =
-    div [] <| List.foldr (\(name, hash) list -> 
-                [ a [ onClick 
-                <| Msgs.GetObjectRequest name hash ] [ Html.text name ] ] ++ [ Html.text " > "] ++ list) [] path
+    E.row Main [] <|
+        List.foldr (\(name, hash) list -> 
+            [ E.button Navigation [ Event.onClick <| Msgs.GetObjectRequest name hash ]
+                <| E.text (name ++ " > ") ] ++ list) [] path
 
 
 viewControls : Model -> Element Styles variation Msg
 viewControls model =
     E.row Main [ spacing 20 ]
         [ Input.text None 
-            [ padding 10 ]
+            [ padding 5 ]
             { onChange = Msgs.UpdateQuery
             , value = model.hash
             , label = Input.placeholder
                             { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Hash"))
                             , text = "Введите адрес объекта"
                             }
-            , options = [ Input.errorBelow (E.el Main [] (E.text "This is an Error!")) ]
+            , options = []
             }
         , Input.text None
-            [ padding 10 ]
+            [ padding 5 ]
             { onChange = Msgs.UpdateData
-            , value = model.hash
+            , value = ""
             , label = Input.placeholder
                             { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
                             , text = "Введите данные объекта"
                             }
-            , options = [ Input.errorBelow (E.el Main [] (E.text "This is an Error!")) ]
+            , options = []
             }
         , E.button Button
-            [ padding 10
+            [ padding 5
             , Event.onClick <| Msgs.GetObjectRequest "Home" model.hash
             ]
-            <| E.text "Get"
+            <| E.text "Взять"
         , E.button Button
-            [ padding 10
+            [ padding 5
             , Event.onClick <| Msgs.SetDataRequest
             ]
-            <| E.text "Set Data"
+            <| E.text "Задать данные"
         ]
 
-viewLink : Link -> Element Styles variation Msg
-viewLink link =
-    E.button None
-            [ padding 10
-            , Event.onClick <| Msgs.GetObjectRequest link.name link.hash
-            ]
-            <| E.text link.name
-{-}
-    a [ onClick <| Msgs.GetObjectRequest link.name link.hash ] [ text link.name ]
-    text ( link.name ++ "  " ++ toString link.size ) ]
-    a [ onClick <| Msgs.RemoveLink link ] [ text "rm-link" ]
--}
+
 
 findLinkByName : Name -> WebData Object -> Maybe Link
 findLinkByName link_name object =
@@ -113,11 +125,6 @@ findLinkByName link_name object =
         Nothing ->
             Nothing
 
-{-|
-viewPureData : String -> Html Msg
-viewPureData data =
-    iframe [ srcdoc data, style [("height", "100%")] ] [] 
--}
 
 maybeRemote : ( a -> Element Styles variation Msg ) -> WebData a -> Element Styles variation Msg
 maybeRemote viewFunction response =
@@ -183,7 +190,7 @@ stylesheet =
             , Color.background Color.white
             , Color.border Color.lightGrey
             , Font.typeface sansSerif
-            , Font.size 16
+            , Font.size 12
             , Font.lineHeight 1.3 -- line height, given as a ratio of current font size.
             ]
         , style Button
@@ -193,27 +200,14 @@ stylesheet =
             , Color.border Color.blue
             , Color.background Color.lightBlue
             ]
+        , style Navigation
+            [ Color.background Color.white 
+            ]
         ]
 
 type Styles
     = None
     | Main
     | Button
+    | Navigation
 
-
-{-
-viewText t =
-    [ E.el Main [] (text "First, Some Text")
-    , E.textLayout None
-        [ spacingXY 25 25
-        , padding 60
-        ]
-        [ E.el Main
-            [ width (px 200)
-            , height (px 300)
-            , alignLeft
-            ]
-            (text t)
-        ]
-    ]
--}

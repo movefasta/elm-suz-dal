@@ -22,7 +22,12 @@ update msg model =
             , Cmd.batch [ getObject hash ] )
 
     Msgs.GetObject response ->
-        ( { model | object = response }, Cmd.none )
+        let
+            object =
+                RemoteData.withDefault {links = [], data = ""} response
+        in
+                
+        ( { model | object = object }, Cmd.batch <| List.map (\a -> getPureData a.hash) object.links )
 
     Msgs.GetModifiedObject response ->
         let
@@ -39,10 +44,22 @@ update msg model =
             ( { model | headers = response, hash = ipfs_hash }, getObject <| ipfs_hash )
 
     Msgs.UpdatePureData response ->
-        ( { model | pure_data = response }, Cmd.none )
+        let
+            object =
+                model.object
+            links =
+                object.links
+            data = RemoteData.withDefault "" response
+            newData =
+                { object | link = { link | data = data } }
+        in
+            ( { model | object = newData }, Cmd.none )
 
     Msgs.RemoveLink link ->
         ( model, removeLink model.hash link )
 
     Msgs.AddLink name hash ->
        ( model, addLink model.hash name hash )
+
+    Msgs.GetData link ->
+        ( model, getPureData link.hash )

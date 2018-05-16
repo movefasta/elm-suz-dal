@@ -45,12 +45,19 @@ rootHashUpdate node acc path =
             case 
 
 -}
-getPureData : Hash -> Cmd Msg
-getPureData hash =
+getPureData : Link -> Cmd Msg
+getPureData link =
+    Http.getString ( ipfsGatewayUrl ++ link.hash )
+        |> RemoteData.sendRequest
+        |> Cmd.map (Msgs.UpdatePureData link)
+
+{-}
+getData : List Link -> Cmd Msg
+getData links =
     Http.getString ( ipfsGatewayUrl ++ hash )
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.UpdatePureData
-
+-}
 
 getObject : Hash -> Cmd Msg
 getObject hash =
@@ -141,7 +148,7 @@ linkDecoder =
         |> required "Name" Decode.string
         |> required "Hash" Decode.string
         |> required "Size" Decode.int
-
+        |> hardcoded ""
 
 headerDecoder : Decode.Decoder ModifiedObject
 headerDecoder =

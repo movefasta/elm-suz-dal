@@ -28,6 +28,7 @@ type alias Link =
     { name : Name
     , hash : Hash
     , size : Int
+    , data : Data
     }
 
 type alias Header =
