@@ -57,11 +57,6 @@ viewLink link =
             <| E.text link.name
         , E.button None
             [ padding 5
-            , Event.onClick <| Msgs.GetData link.hash
-            ]
-            <| E.text link.data
-        , E.button None
-            [ padding 5
             , Event.onClick <| Msgs.RemoveLink link
             ]
             <| E.text "Удалить"
