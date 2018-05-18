@@ -26,7 +26,7 @@ update msg model =
             object =
                 RemoteData.withDefault {links = [], data = ""} response
         in
-            ( { model | object = object }, Cmd.batch <| List.map (\a -> getPureData a.hash) object.links )
+            ( { model | object = response }, Cmd.batch <| List.map (\a -> getPureData a.hash) object.links )
 
     Msgs.GetModifiedObject response ->
         let
@@ -53,7 +53,8 @@ update msg model =
 
     Msgs.AddLink name hash ->
        ( model, addLink model.hash name hash )
-{-
+
     Msgs.GetData link ->
-        ( model, getPureData link.hash )}
+        ( model, getPureData link.hash )
+{-
 -}
