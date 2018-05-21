@@ -6,8 +6,6 @@ import Models exposing (..)
 import Msgs exposing (Msg)
 import RemoteData exposing (WebData)
 import Json.Decode as Decode
-import String.Extra exposing (toCodePoints, fromCodePoints)
---import Commands exposing (ipfsGatewayUrl, pathForUrl, pathUpdate)
 import Color
 import Element as E exposing (Attribute, Element)
 import Element.Attributes exposing (..)
@@ -17,34 +15,48 @@ import Style exposing (..)
 import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
---import Style.Transition as Transition
 
 
 view : Model -> Html Msg
 view model =
     E.layout stylesheet <|
-        E.column None
-            []
-            [ E.el None [ center, width (px 800) ] <|
-                E.column Main
-                    [ spacing 20 ]
-                    [ viewControls model
-                    , viewPath model.path
-                    , maybeRemote viewObject model.object
-                    ]
+        E.column None [ center, width (px 800) ] <|
+            [ E.el None [ center, width (px 800) ] <| viewControls model
+            , E.row Main [ spacing 5 ] <| 
+                [ E.column None
+                        [ spacing 20, width (px 400) ]
+                        [ viewPath model.path
+                        , maybeRemote viewObject model.object
+                        ]
+                , E.el DagJson
+                        [ spacing 20, width (px 400) ]
+                        <| maybeRemote viewRawDag model.raw_dag
+                ]
             ]
 
 
 viewObject : Object -> Element Styles variation Msg
 viewObject object =
-    E.column Main [ spacing 5 ] <|
-        List.concat 
-        [ [ toCodePoints object.data
-                    |> List.foldr removeUTFControlChars []
-                    |> fromCodePoints
-                    |> E.text ]
-        , ( List.map ( \link -> viewLink link ) object.links )
+    E.column Main [ spacing 5 ] <| 
+        ( List.map ( \link -> viewLink link ) object.links )
+
+
+viewRawDag : Data -> Element Styles variation Msg
+viewRawDag raw_dag =
+    --E.paragraph DagJson [ padding 5 ] <| [ E.text raw_dag ]
+    E.column Main [ spacing 20 ]
+        [ Input.multiline None
+            [ padding 5 ]
+            { onChange = Msgs.UpdateData
+            , value = raw_dag
+            , label = Input.placeholder
+                            { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
+                            , text = "Введите данные объекта"
+                            }
+            , options = []
+            }
         ]
+
 
 
 viewLink : Link -> Element Styles variation Msg
@@ -85,26 +97,22 @@ viewControls model =
                             }
             , options = []
             }
-        , Input.text None
-            [ padding 5 ]
-            { onChange = Msgs.UpdateData
-            , value = ""
-            , label = Input.placeholder
-                            { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
-                            , text = "Введите данные объекта"
-                            }
-            , options = []
-            }
         , E.button Button
             [ padding 5
             , Event.onClick <| Msgs.GetObjectRequest "Home" model.hash
             ]
-            <| E.text "Взять"
+            <| E.text "get object"
         , E.button Button
             [ padding 5
-            , Event.onClick <| Msgs.SetDataRequest
+            , Event.onClick <| Msgs.DagPut <| maybeRemote viewRawDag model.raw_dag
             ]
-            <| E.text "Задать данные"
+            <| E.text "set data"
+        , E.button Button
+            [ padding 5
+            , Event.onClick <| Msgs.DagGet model.hash
+            ]
+            <| E.text "dag get"
+
         ]
 
 
@@ -146,26 +154,6 @@ onEnter msg =
         on "keydown" (Decode.andThen isEnter keyCode)
 
 
--- HELPER FUNCTIONS
-
-
-listUnicodeCodes : String -> Html Msg
-listUnicodeCodes data =
-    E.layout stylesheet <| E.text <| List.foldr intToStringFoldFun "" <| toCodePoints data
-
-
-intToStringFoldFun: Int -> String -> String
-intToStringFoldFun a b =
-    ( toString a ) ++ ", " ++ b
-
-
-removeUTFControlChars: Int -> List Int -> List Int
-removeUTFControlChars a b =
-    case ( a > 31 ) && ( a < 65500 ) of
-        True -> [ a ] ++ b
-        False -> b
-
-
 -- STYLES
 
 sansSerif : List Font
@@ -184,9 +172,7 @@ stylesheet =
             , Color.text Color.darkCharcoal
             , Color.background Color.white
             , Color.border Color.lightGrey
-            , Font.typeface sansSerif
-            , Font.size 12
-            , Font.lineHeight 1.3 -- line height, given as a ratio of current font size.
+            , Style.prop "font-family" "'Source Sans Pro', 'Trebuchet MS', 'Lucida Grande', 'Bitstream Vera Sans', 'Helvetica Neue', sans-serif"
             ]
         , style Button
             [ Border.rounded 5
@@ -198,6 +184,8 @@ stylesheet =
         , style Navigation
             [ Color.background Color.white 
             ]
+        , style DagJson
+            [ Style.prop "white-space" "normal" ]
         ]
 
 type Styles
@@ -205,4 +193,24 @@ type Styles
     | Main
     | Button
     | Navigation
+    | DagJson
 
+{-
+-- HELPER FUNCTIONS
+
+listUnicodeCodes : String -> Html Msg
+listUnicodeCodes data =
+    E.layout stylesheet <| E.text <| List.foldr intToStringFoldFun "" <| toCodePoints data
+
+
+intToStringFoldFun: Int -> String -> String
+intToStringFoldFun a b =
+    ( toString a ) ++ ", " ++ b
+
+
+removeUTFControlChars: Int -> List Int -> List Int
+removeUTFControlChars a b =
+    case ( a > 31 ) && ( a < 65500 ) of
+        True -> [ a ] ++ b
+        False -> b
+-}

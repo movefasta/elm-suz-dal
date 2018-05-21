@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <div id="elm-code-is-loaded-here"></div>
+    <script src="elm.js"></script>
+    <script src="https://unpkg.com/ipfs-api/dist/index.js"></script>
+    <script>
+        var element = document.getElementById("elm-code-is-loaded-here");
+        var app = Elm.Main.embed(element);
+        var ipfs = window.IpfsApi('localhost', '5001')
+
+        app.ports.sendData.subscribe(function(data) {
+            console.log("Data from Elm: ", data);
+            ipfs.dag.put(data, { format: 'dag-cbor', hashAlg: 'sha3-512' }, (err, cid) => {
+			  console.log(cid.toBaseEncodedString());
+			  app.ports.receiveData.send(cid.toBaseEncodedString());
+			});
+        });
+    </script>
+</body>
+</html>

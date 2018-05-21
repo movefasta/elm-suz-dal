@@ -8,7 +8,7 @@ type alias Model =
     , hash : Hash
     , data : String
     , headers : WebData Hash
-    , pure_data : WebData String
+    , raw_dag : WebData String
     , path : List Node
     }
 

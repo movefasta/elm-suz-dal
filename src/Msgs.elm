@@ -15,4 +15,6 @@ type Msg
     | GetObject (WebData Object)
     | GetIpfsHash (WebData Hash)
     | UpdatePureData (WebData String)
-    | GetData Link
+    | DagGet Hash
+    | DagPut String
+    | DagHash String

@@ -3,6 +3,7 @@ module Commands exposing (..)
 import Http
 import Json.Decode as Decode
 import Json.Decode.Pipeline exposing (decode, required, hardcoded)
+import Json.Encode as Encode exposing (Value, object)
 import Msgs exposing (Msg)
 import Models exposing (Node, LinkType, Name, Hash, Object, ModifiedObject, Link)
 import RemoteData
@@ -44,20 +45,20 @@ rootHashUpdate node acc path =
         x :: xs ->
             case 
 
--}
 getPureData : Hash -> Cmd Msg
 getPureData hash =
     Http.getString ( ipfsGatewayUrl ++ hash )
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.UpdatePureData
+-}
 
-{-}
-getData : List Link -> Cmd Msg
-getData links =
-    Http.getString ( ipfsGatewayUrl ++ hash )
+
+dagGet : Hash -> Cmd Msg
+dagGet hash =
+    Http.getString ( ipfsApiUrl ++ "dag/get?arg=" ++ hash )
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.UpdatePureData
--}
+
 
 getObject : Hash -> Cmd Msg
 getObject hash =
@@ -155,3 +156,4 @@ headerDecoder =
     decode ModifiedObject
         |> required "Ipfs-Hash" Decode.string
         |> hardcoded []
+
