@@ -15,6 +15,7 @@ import Style exposing (..)
 import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
+import Commands exposing (objectEncoder)
 
 
 view : Model -> Html Msg
@@ -104,7 +105,7 @@ viewControls model =
             <| E.text "get object"
         , E.button Button
             [ padding 5
-            , Event.onClick <| Msgs.DagPut <| maybeRemote viewRawDag model.raw_dag
+            , Event.onClick <| Msgs.DagPut <| objectEncoder <| RemoteData.withDefault {data = "", links = []} model.object
             ]
             <| E.text "set data"
         , E.button Button

@@ -10,6 +10,7 @@
     "exposed-modules": [],
     "dependencies": {
         "BrianHicks/elm-benchmark": "2.0.3 <= v < 3.0.0",
+        "Microsoft/elm-json-tree-view": "1.0.1 <= v < 2.0.0",
         "NoRedInk/elm-decode-pipeline": "3.0.0 <= v < 4.0.0",
         "elm-community/json-extra": "2.1.0 <= v < 3.0.0",
         "elm-community/string-extra": "1.4.0 <= v < 2.0.0",

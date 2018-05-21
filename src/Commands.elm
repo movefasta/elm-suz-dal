@@ -157,3 +157,17 @@ headerDecoder =
         |> required "Ipfs-Hash" Decode.string
         |> hardcoded []
 
+objectEncoder : Object -> Value
+objectEncoder object =
+    Encode.object
+        [ ("Data", Encode.string object.data)
+        , ("Links", Encode.list <| List.map linkEncoder object.links)
+        ]
+
+linkEncoder : Link -> Value
+linkEncoder link =
+    Encode.object
+        [ ("Cid", Encode.object [ ("/", Encode.string link.hash) ])
+        , ("Name", Encode.string link.name)
+        , ("Size", Encode.int link.size)
+        ]

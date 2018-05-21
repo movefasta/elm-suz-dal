@@ -2,6 +2,7 @@ module Msgs exposing (..)
 
 import Models exposing (Level, Name, Hash, Object, ModifiedObject, Link, Data)
 import RemoteData exposing (WebData)
+import Json.Encode exposing (Value)
 
 
 type Msg 
@@ -16,5 +17,5 @@ type Msg
     | GetIpfsHash (WebData Hash)
     | UpdatePureData (WebData String)
     | DagGet Hash
-    | DagPut String
+    | DagPut Value
     | DagHash String
