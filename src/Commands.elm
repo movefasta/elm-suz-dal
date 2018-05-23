@@ -5,7 +5,7 @@ import Json.Decode as Decode
 import Json.Decode.Pipeline exposing (decode, required, hardcoded)
 import Json.Encode as Encode exposing (Value, object)
 import Msgs exposing (Msg)
-import Models exposing (Node, LinkType, Name, Hash, Object, ModifiedObject, Link)
+import Models exposing (Node, LinkType, Name, Hash, Object, ModifiedObject, Link, Data)
 import RemoteData
 import Result
 import Dict
@@ -37,20 +37,6 @@ pathUpdate node acc path =
                 False -> 
                     pathUpdate node (acc ++ [x]) xs 
         [] -> acc ++ [node]
-
-{-|
-rootHashUpdate : Node -> List Node -> List Node -> List Node
-rootHashUpdate node acc path =
-    case List.reverse path of
-        x :: xs ->
-            case 
-
-getPureData : Hash -> Cmd Msg
-getPureData hash =
-    Http.getString ( ipfsGatewayUrl ++ hash )
-        |> RemoteData.sendRequest
-        |> Cmd.map Msgs.UpdatePureData
--}
 
 
 dagGet : Hash -> Cmd Msg
@@ -157,17 +143,20 @@ headerDecoder =
         |> required "Ipfs-Hash" Decode.string
         |> hardcoded []
 
-objectEncoder : Object -> Value
-objectEncoder object =
+
+-- ENCODERS
+
+objectEncoder : Data -> Object -> Value
+objectEncoder data object =
     Encode.object
-        [ ("Data", Encode.string object.data)
-        , ("Links", Encode.list <| List.map linkEncoder object.links)
+        [ ("data", Encode.string data)
+        , ("links", Encode.list <| List.map linkEncoder object.links)
         ]
 
 linkEncoder : Link -> Value
 linkEncoder link =
     Encode.object
-        [ ("Cid", Encode.object [ ("/", Encode.string link.hash) ])
-        , ("Name", Encode.string link.name)
+        [ ("Name", Encode.string link.name)
         , ("Size", Encode.int link.size)
+        , ("Cid", Encode.object [ ("/", Encode.string link.hash) ])
         ]

@@ -16,17 +16,19 @@ import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
 import Commands exposing (objectEncoder)
+import JsonTree
 
 
 view : Model -> Html Msg
 view model =
     E.layout stylesheet <|
-        E.column None [ center, width (px 800) ] <|
-            [ E.el None [ center, width (px 800) ] <| viewControls model
+        E.column Main [ center, width (px 800) ] <|
+            [ E.el Main [ center, width (px 800) ] <| viewControls model
             , E.row Main [ spacing 5 ] <| 
                 [ E.column None
                         [ spacing 20, width (px 400) ]
                         [ viewPath model.path
+                        , viewData model.data
                         , maybeRemote viewObject model.object
                         ]
                 , E.el DagJson
@@ -34,22 +36,13 @@ view model =
                         <| maybeRemote viewRawDag model.raw_dag
                 ]
             ]
-
-
-viewObject : Object -> Element Styles variation Msg
-viewObject object =
-    E.column Main [ spacing 5 ] <| 
-        ( List.map ( \link -> viewLink link ) object.links )
-
-
-viewRawDag : Data -> Element Styles variation Msg
-viewRawDag raw_dag =
-    --E.paragraph DagJson [ padding 5 ] <| [ E.text raw_dag ]
-    E.column Main [ spacing 20 ]
+viewData : Data -> Element Styles variation Msg
+viewData data =
+    E.column Main [ spacing 5 ]
         [ Input.multiline None
             [ padding 5 ]
             { onChange = Msgs.UpdateData
-            , value = raw_dag
+            , value = data
             , label = Input.placeholder
                             { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
                             , text = "Введите данные объекта"
@@ -58,6 +51,28 @@ viewRawDag raw_dag =
             }
         ]
 
+viewObject : Object -> Element Styles variation Msg
+viewObject object =
+    E.column Main [ spacing 5 ] <|
+        ( List.map ( \link -> viewLink link ) object.links )
+
+
+viewRawDag : Data -> Element Styles variation Msg
+viewRawDag raw_dag =
+    E.paragraph DagJson [ padding 5 ] <| [ E.text raw_dag ]
+{-    E.column Main [ spacing 20 ]
+        [ Input.multiline None
+            [ padding 5, height (px 500) ]
+            { onChange = Msgs.UpdateData 
+            , value = raw_dag
+            , label = Input.placeholder
+                            { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
+                            , text = "Введите данные объекта"
+                            }
+            , options = []
+            }
+        ]
+-}
 
 
 viewLink : Link -> Element Styles variation Msg
@@ -105,7 +120,7 @@ viewControls model =
             <| E.text "get object"
         , E.button Button
             [ padding 5
-            , Event.onClick <| Msgs.DagPut <| objectEncoder <| RemoteData.withDefault {data = "", links = []} model.object
+            , Event.onClick <| Msgs.DagPut <| objectEncoder model.data <| RemoteData.withDefault {data = "", links = []} model.object
             ]
             <| E.text "set data"
         , E.button Button
@@ -170,8 +185,9 @@ stylesheet =
         [ style None [] -- It's handy to have a blank style
         , style Main
             [ Border.all 1 -- set all border widths to 1 px.
-            , Color.text Color.darkCharcoal
-            , Color.background Color.white
+            , Font.size 12
+            , Color.text Color.white
+            , Color.background Color.darkCharcoal
             , Color.border Color.lightGrey
             , Style.prop "font-family" "'Source Sans Pro', 'Trebuchet MS', 'Lucida Grande', 'Bitstream Vera Sans', 'Helvetica Neue', sans-serif"
             ]
@@ -179,11 +195,11 @@ stylesheet =
             [ Border.rounded 5
             , Border.all 1
             , Border.solid
-            , Color.border Color.blue
-            , Color.background Color.lightBlue
+            , Color.border Color.white
+            , Color.background Color.lightGray
             ]
         , style Navigation
-            [ Color.background Color.white 
+            [ Color.background Color.darkCharcoal 
             ]
         , style DagJson
             [ Style.prop "white-space" "normal" ]

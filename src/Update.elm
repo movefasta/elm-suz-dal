@@ -60,7 +60,3 @@ update msg model =
 
     Msgs.DagHash data ->
         ( { model | hash = data }, Cmd.none )
-
-
-{-
--}
