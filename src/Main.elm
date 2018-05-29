@@ -27,11 +27,13 @@ initModel =
     , headers = RemoteData.NotAsked
     , raw_dag = RemoteData.Loading
     , path = [ ("Home", initHash) ]
+    , node = { data = "no node loaded", links = [] }
+    , multihash = { typ = "", data = []}
     }
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Ports.receiveData Msgs.DagHash
+    Ports.receiveNode Msgs.GetNodeFromJS
 
 main : Program Never Model Msg
 main =

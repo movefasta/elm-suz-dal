@@ -4,12 +4,12 @@ import RemoteData exposing (WebData)
 
 
 type alias Model =
-    { object : WebData Object
-    , hash : Hash
-    , data : String
-    , headers : WebData Hash
+    { hash : Hash
+    , data : Data
+    , node : Object
     , raw_dag : WebData String
     , path : List Node
+    , multihash : MultihashFromJS
     }
 
 type alias Node =
@@ -37,12 +37,6 @@ type LinkType
     = Folder
     | File
 
--- ModifiedObject приходит в ответ на запросы object put/patch(все)/new/links
-
-type alias ModifiedObject =
-    { hash : String
-    , links : List Link
-    }
 
 -- Alias of basic types
 
@@ -57,3 +51,21 @@ type alias Data =
 
 type alias Level =
     Int
+{-}
+
+type alias MultihashFromJS =
+    { typ : String
+    , data : List Int
+    }
+
+-- ModifiedObject приходит в ответ на запросы object put/patch(все)/new/links
+
+type alias ModifiedObject =
+    { hash : String
+    , links : List Link
+
+type alias JsSetData =
+    { multihash : Hash
+    , data : Data
+    }
+    }

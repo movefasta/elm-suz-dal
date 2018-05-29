@@ -7,14 +7,29 @@
     <script>
         var element = document.getElementById("elm-code-is-loaded-here");
         var app = Elm.Main.embed(element);
-        var ipfs = window.IpfsApi('localhost', '5001')
+        var ipfs = window.IpfsApi('localhost', '5001');
+        const Buffer = window.IpfsApi().Buffer;
+        var util = window.IpfsApi().util;
+        const DAGNode = window.IpfsApi().DAGNode;
 
         app.ports.sendData.subscribe(function(data) {
-            console.log("Data from Elm: ", data);
+            console.log("Dag to put: ", data);
             ipfs.dag.put(data, { format: 'dag-cbor', hashAlg: 'sha3-512' }, (err, cid) => {
 			  console.log(cid.toBaseEncodedString());
 			  app.ports.receiveData.send(cid.toBaseEncodedString());
 			});
+        });
+
+        app.ports.setData.subscribe(function (obj) {
+            console.log("Data to send:", obj.data);
+            console.log("Object to update", obj.multihash);
+            ipfs.object.patch.setData(obj.multihash, new Buffer(obj.data), (err, node) => {
+                console.log("New hash", node.toString());
+                if (err) {
+                    throw err
+                };
+                app.ports.receiveNode.send(node.toString())
+            });
         });
     </script>
 </body>

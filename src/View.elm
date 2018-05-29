@@ -16,7 +16,7 @@ import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
 import Commands exposing (objectEncoder)
-import JsonTree
+--import JsonTree
 
 
 view : Model -> Html Msg
@@ -30,6 +30,7 @@ view model =
                         [ viewPath model.path
                         , viewData model.data
                         , maybeRemote viewObject model.object
+                        , viewObject model.node
                         ]
                 , E.el DagJson
                         [ spacing 20, width (px 400) ]
@@ -51,10 +52,14 @@ viewData data =
             }
         ]
 
+
 viewObject : Object -> Element Styles variation Msg
 viewObject object =
     E.column Main [ spacing 5 ] <|
-        ( List.map ( \link -> viewLink link ) object.links )
+        List.concat
+        [ [ E.el None [] <| E.text object.data ]
+        , ( List.map ( \link -> viewLink link ) object.links )
+        ]
 
 
 viewRawDag : Data -> Element Styles variation Msg
@@ -121,6 +126,11 @@ viewControls model =
         , E.button Button
             [ padding 5
             , Event.onClick <| Msgs.DagPut <| objectEncoder model.data <| RemoteData.withDefault {data = "", links = []} model.object
+            ]
+            <| E.text "dag put"
+        , E.button Button
+            [ padding 5
+            , Event.onClick <| Msgs.SetDataRequest
             ]
             <| E.text "set data"
         , E.button Button
