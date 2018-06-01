@@ -16,6 +16,8 @@ import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
 import Commands exposing (objectEncoder)
+
+
 --import JsonTree
 
 
@@ -24,30 +26,35 @@ view model =
     E.layout stylesheet <|
         E.column Main [ center, width (px 800) ] <|
             [ E.el Main [ center, width (px 800) ] <| viewControls model
-            , E.row Main [ spacing 5 ] <| 
+            , E.row Main [ spacing 5 ] <|
                 [ E.column None
-                        [ spacing 20, width (px 400) ]
-                        [ viewPath model.path
-                        , viewData model.data
-                        , maybeRemote viewObject model.object
-                        , viewObject model.node
-                        ]
+                    [ spacing 20, width (px 400) ]
+                    [ viewPath model.path
+                    , viewData model.data
+                    , maybeRemote viewObject model.object
+                    , viewObject model.node
+                    ]
                 , E.el DagJson
-                        [ spacing 20, width (px 400) ]
-                        <| maybeRemote viewRawDag model.raw_dag
+                    [ spacing 20, width (px 400) ]
+                  <|
+                    maybeRemote viewRawDag model.raw_dag
                 ]
             ]
+
+
 viewData : Data -> Element Styles variation Msg
 viewData data =
-    E.column Main [ spacing 5 ]
+    E.column Main
+        [ spacing 5 ]
         [ Input.multiline None
             [ padding 5 ]
             { onChange = Msgs.UpdateData
             , value = data
-            , label = Input.placeholder
-                            { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
-                            , text = "Введите данные объекта"
-                            }
+            , label =
+                Input.placeholder
+                    { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
+                    , text = "Введите данные узла"
+                    }
             , options = []
             }
         ]
@@ -57,90 +64,77 @@ viewObject : Object -> Element Styles variation Msg
 viewObject object =
     E.column Main [ spacing 5 ] <|
         List.concat
-        [ [ E.el None [] <| E.text object.data ]
-        , ( List.map ( \link -> viewLink link ) object.links )
-        ]
+            [ [ E.el None [] <| E.text object.data ]
+            , (List.map (\link -> viewLink link) object.links)
+            ]
 
 
 viewRawDag : Data -> Element Styles variation Msg
 viewRawDag raw_dag =
     E.paragraph DagJson [ padding 5 ] <| [ E.text raw_dag ]
-{-    E.column Main [ spacing 20 ]
-        [ Input.multiline None
-            [ padding 5, height (px 500) ]
-            { onChange = Msgs.UpdateData 
-            , value = raw_dag
-            , label = Input.placeholder
-                            { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
-                            , text = "Введите данные объекта"
-                            }
-            , options = []
-            }
-        ]
--}
 
 
 viewLink : Link -> Element Styles variation Msg
 viewLink link =
-    E.row Main [ spacing 5 ] 
+    E.row Main
+        [ spacing 5 ]
         [ E.button None
             [ padding 5
             , Event.onClick <| Msgs.GetObjectRequest link.name link.hash
             ]
-            <| E.text link.name
+          <|
+            E.text link.name
         , E.button None
             [ padding 5
             , Event.onClick <| Msgs.RemoveLink link
             ]
-            <| E.text "Удалить"
-
+          <|
+            E.text "Удалить"
         ]
 
 
 viewPath : List Node -> Element Styles variation Msg
 viewPath path =
     E.row Main [] <|
-        List.foldr (\(name, hash) list -> 
-            [ E.button Navigation [ Event.onClick <| Msgs.GetObjectRequest name hash ]
-                <| E.text (name ++ " > ") ] ++ list) [] path
+        List.foldr
+            (\( name, hash ) list ->
+                [ E.button Navigation [ Event.onClick <| Msgs.GetObjectRequest name hash ] <|
+                    E.text (name ++ " > ")
+                ]
+                    ++ list
+            )
+            []
+            path
 
 
 viewControls : Model -> Element Styles variation Msg
 viewControls model =
-    E.row Main [ spacing 20 ]
-        [ Input.text None 
+    E.row Main
+        [ spacing 20 ]
+        [ Input.text None
             [ padding 5 ]
             { onChange = Msgs.UpdateQuery
             , value = model.hash
-            , label = Input.placeholder
-                            { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Hash"))
-                            , text = "Введите адрес объекта"
-                            }
+            , label =
+                Input.placeholder
+                    { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Hash"))
+                    , text = "Введите адрес объекта"
+                    }
             , options = []
             }
         , E.button Button
             [ padding 5
-            , Event.onClick <| Msgs.GetObjectRequest "Home" model.hash
+            , Event.onClick <| Msgs.DagPut <| objectEncoder model.data <| RemoteData.withDefault { data = "", links = [] } model.object
             ]
-            <| E.text "get object"
-        , E.button Button
-            [ padding 5
-            , Event.onClick <| Msgs.DagPut <| objectEncoder model.data <| RemoteData.withDefault {data = "", links = []} model.object
-            ]
-            <| E.text "dag put"
-        , E.button Button
-            [ padding 5
-            , Event.onClick <| Msgs.SetDataRequest
-            ]
-            <| E.text "set data"
+          <|
+            E.text "dag put"
         , E.button Button
             [ padding 5
             , Event.onClick <| Msgs.DagGet model.hash
             ]
-            <| E.text "dag get"
-
+          <|
+            E.text "dag get"
         ]
-
 
 
 findLinkByName : Name -> WebData Object -> Maybe Link
@@ -155,15 +149,18 @@ findLinkByName link_name object =
             Nothing
 
 
-maybeRemote : ( a -> Element Styles variation Msg ) -> WebData a -> Element Styles variation Msg
+maybeRemote : (a -> Element Styles variation Msg) -> WebData a -> Element Styles variation Msg
 maybeRemote viewFunction response =
     case response of
         RemoteData.NotAsked ->
             E.text ""
+
         RemoteData.Loading ->
             E.text "Loading..."
+
         RemoteData.Success object ->
             viewFunction object
+
         RemoteData.Failure error ->
             E.text (toString error)
 
@@ -180,7 +177,9 @@ onEnter msg =
         on "keydown" (Decode.andThen isEnter keyCode)
 
 
+
 -- STYLES
+
 
 sansSerif : List Font
 sansSerif =
@@ -188,6 +187,7 @@ sansSerif =
     , Font.font "arial"
     , Font.font "sans-serif"
     ]
+
 
 stylesheet : StyleSheet Styles variation
 stylesheet =
@@ -209,11 +209,12 @@ stylesheet =
             , Color.background Color.lightGray
             ]
         , style Navigation
-            [ Color.background Color.darkCharcoal 
+            [ Color.background Color.darkCharcoal
             ]
         , style DagJson
             [ Style.prop "white-space" "normal" ]
         ]
+
 
 type Styles
     = None
@@ -222,22 +223,24 @@ type Styles
     | Navigation
     | DagJson
 
+
+
 {-
--- HELPER FUNCTIONS
+   -- HELPER FUNCTIONS
 
-listUnicodeCodes : String -> Html Msg
-listUnicodeCodes data =
-    E.layout stylesheet <| E.text <| List.foldr intToStringFoldFun "" <| toCodePoints data
-
-
-intToStringFoldFun: Int -> String -> String
-intToStringFoldFun a b =
-    ( toString a ) ++ ", " ++ b
+   listUnicodeCodes : String -> Html Msg
+   listUnicodeCodes data =
+       E.layout stylesheet <| E.text <| List.foldr intToStringFoldFun "" <| toCodePoints data
 
 
-removeUTFControlChars: Int -> List Int -> List Int
-removeUTFControlChars a b =
-    case ( a > 31 ) && ( a < 65500 ) of
-        True -> [ a ] ++ b
-        False -> b
+   intToStringFoldFun: Int -> String -> String
+   intToStringFoldFun a b =
+       ( toString a ) ++ ", " ++ b
+
+
+   removeUTFControlChars: Int -> List Int -> List Int
+   removeUTFControlChars a b =
+       case ( a > 31 ) && ( a < 65500 ) of
+           True -> [ a ] ++ b
+           False -> b
 -}

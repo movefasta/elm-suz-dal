@@ -9,7 +9,6 @@ type alias Model =
     , node : Object
     , raw_dag : WebData String
     , path : List Node
-    , multihash : MultihashFromJS
     }
 
 type alias Node =

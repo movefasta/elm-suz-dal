@@ -12,11 +12,12 @@ import Ports
 
 init : ( Model, Cmd Msg )
 init =
-    (initModel, getObject initModel.hash)
+    ( initModel, getObject initModel.hash )
 
 
 initHash : Hash
-initHash = "QmaTTU7VZ3kD7Sz8ffrRVD7eLisDT8uJxgnNj92hcTZsFT"
+initHash =
+    "QmaTTU7VZ3kD7Sz8ffrRVD7eLisDT8uJxgnNj92hcTZsFT"
 
 
 initModel : Model
@@ -26,14 +27,16 @@ initModel =
     , data = ""
     , headers = RemoteData.NotAsked
     , raw_dag = RemoteData.Loading
-    , path = [ ("Home", initHash) ]
+    , path = [ ( "Home", initHash ) ]
     , node = { data = "no node loaded", links = [] }
-    , multihash = { typ = "", data = []}
+    , multihash = { typ = "", data = [] }
     }
+
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Ports.receiveNode Msgs.GetNodeFromJS
+    Ports.receiveData Msgs.UpdateQuery
+
 
 main : Program Never Model Msg
 main =
