@@ -8,18 +8,12 @@ import Json.Encode exposing (Value)
 type Msg 
     = UpdateQuery Hash
     | UpdateData Data
-    | DagGet Hash
+    | DagGet Name Hash
     | DagPut Value
-
-{-
-    | DagHash String
-    | GetObjectRequest Name Hash
-    | SetDataRequest
-    | RemoveLink Link
-    | AddLink Name Hash
-    | GetModifiedObject (WebData Hash)
-    | GetObject (WebData Object)
-    | GetIpfsHash (WebData Hash)
-    | UpdatePureData (WebData String)
-    | GetNodeFromJS String
--}
+    | PreviewGet Link
+    | UpdateNode (WebData String)
+    | UpdatePreview (WebData String)
+    | UpdateDescription Data
+    | UpdateLink Link
+    | EditText Link
+    | NoOp

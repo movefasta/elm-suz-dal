@@ -1,32 +1,94 @@
 module Update exposing (..)
 
 import Commands exposing (..)
-import Models exposing (Model, Node)
+import Models exposing (..)
 import Msgs exposing (Msg)
 import RemoteData
 import Json.Decode as Decode
 import Ports
+import Dom
+import Task
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        Msgs.NoOp ->
+            model ! []
         Msgs.UpdateQuery value ->
-            { model | hash = value } ! []
+            ( { model | hash = value, path = [ ( "Home", value ) ] }, Cmd.none )
 
         Msgs.UpdateData value ->
             { model | data = value } ! []
 
-        Msgs.DagGet hash ->
-            ( model, dagGet hash )
+        Msgs.DagGet name hash ->
+            let
+                newPath =
+                    pathUpdate (name, hash) [] model.path
+            in
+                ( { model | path = newPath, hash = hash }, Cmd.batch [ dagGet hash, previewGet hash ] )
 
         Msgs.DagPut data ->
             ( model, Ports.sendData data )
 
+        Msgs.UpdateNode response ->
+            let
+                object =
+                    RemoteData.withDefault "response fails" response
+            in
+                ( { model | node = Result.withDefault [ { name = "", size = 0, cid = "", description = "нет ссылок", status = Completed } ]
+                              <| Decode.decodeString linksDecoder object }, Cmd.none )
 
+        Msgs.PreviewGet link ->
+            ( { model | link = link, data = link.description }, previewGet link.cid )
 
--- ДОСТОЯНИЕ ИСТОРИИ
+        Msgs.UpdatePreview response ->
+            ( { model | raw_dag = response }, Cmd.none )
+
+        Msgs.UpdateDescription desc ->
+            let
+                updateLink x = { x | description = desc }
+            in
+                { model | link = updateLink model.link } ! []
+
+        Msgs.UpdateLink link ->
+            let
+                updateLink x =
+                    if x.name == link.name then
+                        { link | status = Completed }
+                    else
+                        x
+
+                updateLinkStatus =
+                    { link | status = Completed }
+            in
+                { model | node = List.map updateLink model.node, link = updateLinkStatus } ! []
+
+        Msgs.EditText link ->
+            let
+                updateLinkStatus =
+                    { link | status = Editing }
+
+                focus =
+                    Dom.focus ("link-" ++ link.name)
+            in
+                { model | link = updateLinkStatus } ! [ Task.attempt (\_ -> Msgs.NoOp) focus ]
 {-
+
+        Msgs.AddLink link ->
+            ( { model | node = { data = model.node.data, links = model.node.links ++ [ link ] } }, Cmd.none )
+
+        Msgs.AddLink link ->
+          let
+            newNode =
+              { node | links = model.links ++ link }
+          in
+            { model | node = newNode } ! [ Cmd.none ]
+
+        Msgs.AddFile file ->
+
+        FileUpload ->
+            ( model, model.file |> Maybe.map sendFileToServer |> Maybe.withDefault Cmd.none )
 
    Msgs.GetNodeFromJS array ->
        let
@@ -65,10 +127,6 @@ update msg model =
 
        in
            ( { model | headers = response, hash = ipfs_hash }, getObject ipfs_hash )
-
-   Msgs.UpdatePureData response ->
-       ( { model | raw_dag = response }, Cmd.none )
-
 
    Msgs.RemoveLink link ->
        ( model, removeLink model.hash link )

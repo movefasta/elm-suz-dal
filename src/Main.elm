@@ -1,7 +1,7 @@
 module Main exposing (..)
 
-import Commands exposing (getObject)
-import Models exposing (Node, Model, Link, Object, Hash)
+import Commands exposing (..)
+import Models exposing (..)
 import Msgs exposing (Msg)
 import Update exposing (update)
 import View exposing (view)
@@ -12,24 +12,31 @@ import Ports
 
 init : ( Model, Cmd Msg )
 init =
-    ( initModel, getObject initModel.hash )
+    ( initModel, Cmd.batch [ dagGet initModel.hash, previewGet initModel.hash ] )
 
 
 initHash : Hash
 initHash =
-    "QmaTTU7VZ3kD7Sz8ffrRVD7eLisDT8uJxgnNj92hcTZsFT"
+    "zdpuAsSX2eshk21XSNw68jKxNrNiNjyfait15FddyzaxATGhx"
 
+initLink : Link
+initLink =
+    { name = "имя ссылки"
+    , size = 0
+    , cid = "адрес(мультихэш)"
+    , description = "описание ссылки"
+    , status = Completed
+    }
 
 initModel : Model
 initModel =
-    { object = RemoteData.Loading
-    , hash = initHash
+    { hash = initHash
     , data = ""
-    , headers = RemoteData.NotAsked
+    , node = []
+    , link = initLink
     , raw_dag = RemoteData.Loading
     , path = [ ( "Home", initHash ) ]
-    , node = { data = "no node loaded", links = [] }
-    , multihash = { typ = "", data = [] }
+    , draft = []
     }
 
 

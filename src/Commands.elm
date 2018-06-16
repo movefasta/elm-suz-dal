@@ -2,13 +2,12 @@ module Commands exposing (..)
 
 import Http
 import Json.Decode as Decode
-import Json.Decode.Pipeline exposing (decode, required, hardcoded)
+import Json.Decode.Pipeline exposing (decode, required, hardcoded, optional, requiredAt)
 import Json.Encode as Encode exposing (Value, object)
 import Msgs exposing (Msg)
 import Models exposing (..)
 import RemoteData
 import Result
-import Dict
 
 -- URL's
 
@@ -26,7 +25,15 @@ dagGet : Hash -> Cmd Msg
 dagGet hash =
     Http.getString ( ipfsApiUrl ++ "dag/get?arg=" ++ hash )
         |> RemoteData.sendRequest
-        |> Cmd.map Msgs.UpdatePureData
+        |> Cmd.map Msgs.UpdateNode
+
+previewGet : Hash -> Cmd Msg
+previewGet hash =
+    Http.getString ( ipfsApiUrl ++ "dag/get?arg=" ++ hash )
+        |> RemoteData.sendRequest
+        |> Cmd.map Msgs.UpdatePreview
+
+
 
 -- DECODERS
 
@@ -34,13 +41,39 @@ nodeDecoder : Decode.Decoder Object -> Value -> Result String Object
 nodeDecoder objectDecoder value =
     Decode.decodeValue objectDecoder value
 
+{-}
+objectDecoder : Decode.Decoder Object
+objectDecoder =
+    decode Object
+        |> optional "data" Decode.string 
+        |> required "links" linksDecoder
+-}
+
+linksDecoder : Decode.Decoder (List Link)
+linksDecoder =
+    Decode.field "links" <| Decode.list linkDecoder
+
+linkDecoder : Decode.Decoder Link
+linkDecoder =
+    decode Link
+        |> required "Name" Decode.string
+        |> required "Size" Decode.int
+        |> requiredAt ["Cid", "/"] Decode.string
+        |> optional "Description" Decode.string ""
+        |> hardcoded Completed
+
+cidDecoder : Decode.Decoder Cid
+cidDecoder =
+    decode Cid
+        |> required "/" Decode.string
+
 -- ENCODERS
 
-objectEncoder : Data -> Object -> Value
-objectEncoder data object =
+objectEncoder : Data -> List Link -> Value
+objectEncoder data list =
     Encode.object
         [ ("data", Encode.string data)
-        , ("links", Encode.list <| List.map linkEncoder object.links)
+        , ("links", Encode.list <| List.map linkEncoder list)
         ]
 
 linkEncoder : Link -> Value
@@ -48,15 +81,11 @@ linkEncoder link =
     Encode.object
         [ ("Name", Encode.string link.name)
         , ("Size", Encode.int link.size)
-        , ("Cid", Encode.object [ ("/", Encode.string link.hash) ])
+        , ("Cid", Encode.object [ ( "/", Encode.string link.cid ) ] )
+        , ("Description", Encode.string link.description)
         ]
 
 -- HELPERS
-
-pathForUrl : List Node -> String
-pathForUrl path = 
-    List.foldr (\( name, hash ) list -> (name ++ "/") ++ list) "" path
-
 
 pathUpdate : Node -> List Node -> List Node -> List Node
 pathUpdate node acc path =
@@ -69,25 +98,21 @@ pathUpdate node acc path =
                     pathUpdate node (acc ++ [x]) xs 
         [] -> acc ++ [node]
 
+
+addLink :  Int -> Hash -> Name -> Link
+addLink id cid name =
+    { name = name
+    , size = 0
+    , cid = cid
+    , description = ""
+    , status = Completed
+    }
+
 {-
 
-objectDecoder : Decode.Decoder Object
-objectDecoder =
-    decode Object
-        |> required "Data" Decode.string
-        |> required "Links" linksDecoder
-
-linksDecoder : Decode.Decoder (List Link)
-linksDecoder =
-    Decode.list linkDecoder
-
-linkDecoder : Decode.Decoder Link
-linkDecoder =
-    decode Link
-        |> required "Name" Decode.string
-        |> required "Hash" Decode.string
-        |> required "Size" Decode.int
-
+pathForUrl : List Node -> String
+pathForUrl path = 
+    List.foldr (\( name, hash ) list -> (name ++ "/") ++ list) "" path
 
 multihashDecoder : Decode.Decoder MultihashFromJS
 multihashDecoder =
@@ -119,11 +144,6 @@ headerDecoder =
 -- ДОСТОЯНИЕ ИСТОРИИ
 
 {-
-getObject : Hash -> Cmd Msg
-getObject hash =
-    Http.get (ipfsApiUrl ++ "object/get?arg=" ++ hash) objectDecoder
-        |> RemoteData.sendRequest
-        |> Cmd.map Msgs.GetObject
 
 setData : String -> Hash -> Cmd Msg
 setData data hash =
