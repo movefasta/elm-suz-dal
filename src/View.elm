@@ -1,6 +1,7 @@
 module View exposing (..)
 
 import Html exposing (Html)
+import Html.Attributes as HtA exposing (width, height)
 import Models exposing (..)
 import Msgs exposing (Msg)
 import RemoteData exposing (WebData)
@@ -15,22 +16,24 @@ import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
 import Commands exposing (objectEncoder)
+import Material.Icons.Image as Icon exposing (edit)
+import Svg exposing (svg)
+
 
 view : Model -> Html Msg
 view model =
     E.layout stylesheet <|
-        E.column None [ padding 20, width (percent 100), spacing 10 ] <|
+        E.column None [ padding 20, spacing 10 ] <|
             [ E.el None [] <| viewControls model
             , E.el None [] <| viewPath model.path
-            , E.row Main [ spacing 20 ]
+            , E.row None [ spacing 20 ]
                 [ E.column None
-                    [ spacing 5, minWidth (px 150) ]
+                    [ spacing 5 ]
                     [ viewLinks model.node
                     ]
                 , E.column None
                     [ spacing 5 ]
-                    [ E.el None [] <| viewData model.data
-                    , E.el None [] <| viewLinkProperties model.link
+                    [ E.el None [] <| viewLinkProperties model.link
                     , E.el None [] <| maybeRemote viewRawDag model.raw_dag
                     ]
                 ]
@@ -42,7 +45,7 @@ viewRawDag raw_dag =
 
 viewLinks : List Link -> Element Styles variation Msg
 viewLinks links =
-    E.column Cell [ spacing 5 ] <|
+    E.column None [ spacing 5 ] <|
         List.concat
             [ (List.map (\link -> viewLink link) links) ]
 
@@ -55,21 +58,21 @@ viewLinkProperties link =
                     Input.text None 
                         [ padding 5
                         , id ("link-" ++ link.name)
-                        , onEnter <| Msgs.UpdateLink link
-                        , Event.onBlur <| Msgs.UpdateLink link
+                        , onEnter <| Msgs.UpdateLink link Completed
+                        , Event.onBlur <| Msgs.UpdateLink link Completed
                         ]
                         { onChange = Msgs.UpdateDescription
                         , value = link.description
                         , label = 
                             Input.placeholder { label = Input.hiddenLabel <| "", text = "Текст" }
-                        , options = [ Input.textKey "Desc" ]
+                        , options = []
                         }
                 Completed -> 
-                    E.el None [ padding 5 ] <| E.text link.description
+                    E.el Cell [ padding 5 ] <| E.text link.description
     in
         E.column None 
             [ spacing 5 ]
-            [ E.el Cell [ Event.onClick <| Msgs.EditText link ] <| div
+            [ E.el Cell [ Event.onClick <| Msgs.UpdateLink link Editing ] <| div
             , E.el None [ padding 5 ] <| E.text link.cid
             ]
 
@@ -78,20 +81,23 @@ viewLink : Link -> Element Styles variation Msg
 viewLink link =
     let
         style =
-            case link.name of
-                "0" -> Red
-                "1" -> Green
-                _ -> CheckedCell
+            case link.status of
+                Editing -> CheckedCell
+                _ -> case link.name of
+                    "0" -> Red
+                    "1" -> Green
+                    _ -> Cell
     in
-        E.el style
-            [ padding 10
-            , width (px 150)
-            , maxHeight fill
-            , Event.onClick <| Msgs.PreviewGet link
-            , Event.onDoubleClick <| Msgs.DagGet link.name link.cid
+        E.row style [ spacing 5 ]
+            [ E.el None
+                [ padding 10
+                , minWidth (px 130)
+                , Event.onClick <| Msgs.PreviewGet link
+                , Event.onDoubleClick <| Msgs.DagGet link.name link.cid
+                ]
+                <| E.paragraph None [] [ E.text link.description ]
+            , editIcon link
             ]
-            <| E.paragraph None [] [ E.text link.description ]
-
 
 viewPath : List Node -> Element Styles variation Msg
 viewPath path =
@@ -126,16 +132,26 @@ viewControls model =
             [ padding 5
             , Event.onClick <| Msgs.DagPut <| objectEncoder model.data model.node
             ]
-          <|
-            E.text "dag put"
+          <| E.text "dag put"
         , E.button Cell
             [ padding 5
             , Event.onClick <| Msgs.DagGet "Home" model.hash
             ]
-          <|
-            E.text "dag get"
+          <| E.text "dag get"
         ]
 
+editIcon : Link -> Element Styles variation Msg
+editIcon link =
+    E.el EditIcon 
+        [ padding 5
+        , Event.onClick <| Msgs.UpdateLink link Editing
+        ] 
+        <| E.html 
+        <| Svg.svg 
+            [ HtA.width 18
+            , HtA.height 18
+            ]
+            [ Icon.edit Color.black 18 ]
 
 -- STYLES
 
@@ -163,22 +179,27 @@ stylesheet =
             ]
         , style Cell
             [ cursor "pointer"
+            , hover [ Color.background <| Color.grayscale 0.1 ]
             ]
         , style CheckedCell
-            [ Border.all 2.0
+            [ Border.right 2.0
             , Border.solid
             , Color.border Color.black
-            , Color.background Color.darkGrey
-            , Color.text Color.white
             ]
         , style Green
             [ Color.text Color.white
-            , Color.background Color.green 
+            , Color.background Color.green
+            , hover 
+                [ Color.background <| Color.black ] 
             ]
         , style Red 
             [ Color.text Color.white
             , Color.background Color.red 
+            , hover 
+                [ Color.background <| Color.black ]
             ]
+        , style EditIcon
+            [ cursor "pointer" ]
         ]
 
 
@@ -190,6 +211,7 @@ type Styles
     | Red
     | Green
     | CheckedCell
+    | EditIcon
 
 
 findLinkByName : Name -> WebData Object -> Maybe Link

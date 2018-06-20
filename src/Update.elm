@@ -51,28 +51,27 @@ update msg model =
             in
                 { model | link = updateLink model.link } ! []
 
-        Msgs.UpdateLink link ->
+        Msgs.UpdateLink link status ->
             let
-                updateLink x =
+                updateNodeLinksList x =
                     if x.name == link.name then
-                        { link | status = Completed }
+                        { link | status = status }
                     else
                         x
 
                 updateLinkStatus =
-                    { link | status = Completed }
-            in
-                { model | node = List.map updateLink model.node, link = updateLinkStatus } ! []
+                    { link | status = status }
 
-        Msgs.EditText link ->
-            let
-                updateLinkStatus =
-                    { link | status = Editing }
-
-                focus =
-                    Dom.focus ("link-" ++ link.name)
+                cmd =
+                    case status of 
+                        Editing ->
+                            Task.attempt (\_ -> Msgs.NoOp) <| Dom.focus ("link-" ++ link.name)
+                        Completed ->
+                            Cmd.none
             in
-                { model | link = updateLinkStatus } ! [ Task.attempt (\_ -> Msgs.NoOp) focus ]
+                { model | node = List.map updateNodeLinksList model.node, link = updateLinkStatus }
+                    ! [ cmd ]
+
 {-
 
         Msgs.AddLink link ->

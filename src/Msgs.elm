@@ -14,6 +14,5 @@ type Msg
     | UpdateNode (WebData String)
     | UpdatePreview (WebData String)
     | UpdateDescription Data
-    | UpdateLink Link
-    | EditText Link
+    | UpdateLink Link EntryStatus
     | NoOp
