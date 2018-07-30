@@ -1,17 +1,20 @@
 module Models exposing (..)
 
 import RemoteData exposing (WebData)
---import FileReader exposing (NativeFile)
+import DropZone
+import FileReader exposing (NativeFile)
 
 type alias Model =
-    { hash : Hash
-    , data : Data
+    { hash : Hash -- query hash
+    , data : Data -- some data to send
     , node : List Link
     , link : Link
-    , draft : List Link
-    , raw_dag : WebData String
-    , path : List Node
---    , file : Maybe NativeFile
+    , draft : List Link -- file list
+    , raw_dag : WebData String -- daw dag for response debugging
+    , path : List Node -- breadthumbs or dag nodes navigation
+    , dropZone :
+        DropZone.Model
+    , files : List NativeFile
     }
 
 type alias Cid =
@@ -20,6 +23,9 @@ type alias Cid =
 type EntryStatus 
     = Editing
     | Completed
+
+type alias Path =
+    List Node
 
 type alias Node =
     ( Name, Hash )
@@ -33,13 +39,22 @@ type alias Link =
     { name : Name
     , size : Int
     , cid : Hash
-    , description : String
+    , obj_type : Int
     , status : EntryStatus
     }
 
+type alias AddFileResponse =
+    { name : Name
+    , size : Int
+    , hash : Hash
+    }
+
 type LinkType 
-    = Folder
+    = Raw
+    | Directory
     | File
+    | Metadata
+    | Symlink
 
 type alias Hash =
     String

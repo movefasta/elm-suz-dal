@@ -8,23 +8,24 @@ import View exposing (view)
 import Html exposing (program)
 import RemoteData
 import Ports
+import DropZone
 
 
 init : ( Model, Cmd Msg )
 init =
-    ( initModel, Cmd.batch [ dagGet initModel.hash, previewGet initModel.hash ] )
+    ( initModel, Cmd.batch [ lsObjects initModel.hash, previewGet initModel.hash ] )
 
 
 initHash : Hash
 initHash =
-    "zdpuAsSX2eshk21XSNw68jKxNrNiNjyfait15FddyzaxATGhx"
+    "QmaaWo8DMGGkdVvMFz7Ld4DzdeyhRHNGy2aBpM7TcCKWLu"
 
 initLink : Link
 initLink =
     { name = "имя ссылки"
-    , size = 0
+    , size = 0  
     , cid = "адрес(мультихэш)"
-    , description = "описание ссылки"
+    , obj_type = 2
     , status = Completed
     }
 
@@ -37,6 +38,9 @@ initModel =
     , raw_dag = RemoteData.Loading
     , path = [ ( "Home", initHash ) ]
     , draft = []
+    , dropZone =
+        DropZone.init
+    , files = []
     }
 
 
@@ -53,3 +57,4 @@ main =
         , update = update
         , subscriptions = subscriptions
         }
+        

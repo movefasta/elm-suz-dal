@@ -1,17 +1,23 @@
 {
     "version": "1.0.0",
-    "summary": "helpful summary of your project, less than 80 characters",
-    "repository": "https://github.com/user/project.git",
+    "summary": "elm emplementation of suz-dal network",
+    "repository": "https://github.com/movefasta/elm-suz-dal.git",
     "license": "BSD3",
     "source-directories": [
-        "src",
-        "."
+        ".",
+        "./src",
+        "../src",
+        "./file-reader/src",
+        "./file-reader/src/Native"
     ],
     "exposed-modules": [],
+    "native-modules": true,
     "dependencies": {
         "BrianHicks/elm-benchmark": "2.0.3 <= v < 3.0.0",
         "Microsoft/elm-json-tree-view": "1.0.1 <= v < 2.0.0",
         "NoRedInk/elm-decode-pipeline": "3.0.0 <= v < 4.0.0",
+        "danyx23/elm-dropzone": "2.0.1 <= v < 3.0.0",
+        "danyx23/elm-mimetype": "4.0.0 <= v < 5.0.0",
         "elm-community/json-extra": "2.1.0 <= v < 3.0.0",
         "elm-community/material-icons": "1.1.0 <= v < 2.0.0",
         "elm-community/string-extra": "1.4.0 <= v < 2.0.0",
@@ -36,6 +42,7 @@
                 "ext": "js"
             },
             "path": "build/elm.js"
-        }
+        },
+        "html": "build/elm.js"
     }
 }

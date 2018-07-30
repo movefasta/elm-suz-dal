@@ -15,9 +15,11 @@ import Style exposing (..)
 import Style.Border as Border
 import Style.Color as Color
 import Style.Font as Font
-import Commands exposing (objectEncoder)
+import Commands exposing (..)
 import Material.Icons.Image as Icon exposing (edit)
 import Svg exposing (svg)
+import DropZone exposing (dropZoneEventHandlers, isHovering)
+import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile)
 
 
 view : Model -> Html Msg
@@ -29,25 +31,32 @@ view model =
             , E.row None [ spacing 20 ]
                 [ E.column None
                     [ spacing 5 ]
-                    [ viewLinks model.node
+                    [ viewLinksByType 1 model.node -- Show Directories
                     ]
                 , E.column None
                     [ spacing 5 ]
-                    [ E.el None [] <| viewLinkProperties model.link
+                    [ viewLinksByType 2 model.draft -- Show Files
+                    , E.el None [] <| viewLinkProperties model.link
                     , E.el None [] <| maybeRemote viewRawDag model.raw_dag
+                    , E.el None [] <| E.html <| renderDropZone model.dropZone
                     ]
                 ]
             ]
 
 viewRawDag : Data -> Element Styles variation Msg
 viewRawDag raw_dag =
-    E.el None [] <| E.paragraph None [ padding 5 ] <| [ E.text raw_dag ]
+    E.el RawData [] <| E.paragraph None [ padding 5 ] <| [ E.text raw_dag ]
 
-viewLinks : List Link -> Element Styles variation Msg
-viewLinks links =
+viewLinksByType : Int -> List Link -> Element Styles variation Msg
+viewLinksByType obj_type links =
     E.column None [ spacing 5 ] <|
-        List.concat
-            [ (List.map (\link -> viewLink link) links) ]
+        List.foldl
+            (\link list ->
+                if (link.obj_type == obj_type) then
+                    list ++ [ viewLink link ] 
+                else list
+                ) 
+            [] links
 
 viewLinkProperties : Link -> Element Styles variation Msg
 viewLinkProperties link =
@@ -55,20 +64,20 @@ viewLinkProperties link =
         div =
             case link.status of 
                 Editing ->
-                    Input.text None 
+                    Input.text None
                         [ padding 5
                         , id ("link-" ++ link.name)
                         , onEnter <| Msgs.UpdateLink link Completed
                         , Event.onBlur <| Msgs.UpdateLink link Completed
                         ]
                         { onChange = Msgs.UpdateDescription
-                        , value = link.description
+                        , value = link.name
                         , label = 
                             Input.placeholder { label = Input.hiddenLabel <| "", text = "Текст" }
                         , options = []
                         }
                 Completed -> 
-                    E.el Cell [ padding 5 ] <| E.text link.description
+                    E.el Cell [ padding 5 ] <| E.text link.name
     in
         E.column None 
             [ spacing 5 ]
@@ -83,21 +92,18 @@ viewLink link =
         style =
             case link.status of
                 Editing -> CheckedCell
-                _ -> case link.name of
-                    "0" -> Red
-                    "1" -> Green
+                _ -> case link.obj_type of
+                    1 -> Red
+                    2 -> Green
                     _ -> Cell
     in
-        E.row style [ spacing 5 ]
-            [ E.el None
+        E.el style
                 [ padding 10
                 , minWidth (px 130)
                 , Event.onClick <| Msgs.PreviewGet link
                 , Event.onDoubleClick <| Msgs.DagGet link.name link.cid
                 ]
-                <| E.paragraph None [] [ E.text link.description ]
-            , editIcon link
-            ]
+                <| E.paragraph None [] [ E.text link.name ]
 
 viewPath : List Node -> Element Styles variation Msg
 viewPath path =
@@ -132,17 +138,27 @@ viewControls model =
             [ padding 5
             , Event.onClick <| Msgs.DagPut <| objectEncoder model.data model.node
             ]
-          <| E.text "dag put"
+          <| E.text "dag-cbor put"
         , E.button Cell
             [ padding 5
             , Event.onClick <| Msgs.DagGet "Home" model.hash
             ]
           <| E.text "dag get"
+        , E.button Cell
+            [ padding 5
+            , Event.onClick <| Msgs.DagPutPB <| objectEncoder model.data model.node
+            ]
+          <| E.text "dag-pb put"
+        , E.button Cell
+            [ padding 5
+            , Event.onClick <| Msgs.LsObjects model.hash
+            ]
+          <| E.text "ls"
         ]
 
 editIcon : Link -> Element Styles variation Msg
 editIcon link =
-    E.el EditIcon 
+    E.el EditIcon
         [ padding 5
         , Event.onClick <| Msgs.UpdateLink link Editing
         ] 
@@ -152,66 +168,6 @@ editIcon link =
             , HtA.height 18
             ]
             [ Icon.edit Color.black 18 ]
-
--- STYLES
-
-
-fontFamily : List Font
-fontFamily =
-    [ Font.font "Source Sans Pro" 
-    , Font.font "Trebuchet MS"
-    , Font.font "Lucida Grande"
-    , Font.font "Bitstream Vera Sans"
-    , Font.font "Helvetica Neue"
-    , Font.font "sans-serif"
-    ]
-
-
-stylesheet : StyleSheet Styles variation
-stylesheet =
-    Style.styleSheet
-        [ style None []
-        , style Main
-            [ Font.size 12
-            , Color.text Color.charcoal
-            , Color.background Color.white
-            , Font.typeface fontFamily      
-            ]
-        , style Cell
-            [ cursor "pointer"
-            , hover [ Color.background <| Color.grayscale 0.1 ]
-            ]
-        , style CheckedCell
-            [ Border.right 2.0
-            , Border.solid
-            , Color.border Color.black
-            ]
-        , style Green
-            [ Color.text Color.white
-            , Color.background Color.green
-            , hover 
-                [ Color.background <| Color.black ] 
-            ]
-        , style Red 
-            [ Color.text Color.white
-            , Color.background Color.red 
-            , hover 
-                [ Color.background <| Color.black ]
-            ]
-        , style EditIcon
-            [ cursor "pointer" ]
-        ]
-
-
-type Styles
-    = None
-    | Main
-    | Navigation
-    | Cell
-    | Red
-    | Green
-    | CheckedCell
-    | EditIcon
 
 
 findLinkByName : Name -> WebData Object -> Maybe Link
@@ -270,3 +226,103 @@ maybeRemote viewFunction response =
 
         RemoteData.Failure error ->
             E.text (toString error)
+
+
+renderDropZone : DropZone.Model -> Html Msg
+renderDropZone dropZoneModel =
+    Html.map Msgs.DnD
+        (Html.div (renderZoneAttributes dropZoneModel) [])
+
+
+renderZoneAttributes : DropZone.Model -> List (Html.Attribute (DropZone.DropZoneMessage (List NativeFile)))
+renderZoneAttributes dropZoneModel =
+    (if DropZone.isHovering dropZoneModel then
+        dropZoneHover
+        -- style the dropzone differently depending on whether the user is hovering
+     else
+        dropZoneDefault
+    )
+        :: -- add the necessary DropZone event wiring
+           dropZoneEventHandlers FileReader.parseDroppedFiles
+
+-- STYLES
+
+fontFamily : List Font
+fontFamily =
+    [ Font.font "Source Sans Pro" 
+    , Font.font "Trebuchet MS"
+    , Font.font "Lucida Grande"
+    , Font.font "Bitstream Vera Sans"
+    , Font.font "Helvetica Neue"
+    , Font.font "sans-serif"
+    ]
+
+
+type Styles
+    = None
+    | Main
+    | Navigation
+    | Cell
+    | Red
+    | Green
+    | CheckedCell
+    | EditIcon
+    | DragHover
+    | RawData
+
+stylesheet : StyleSheet Styles variation
+stylesheet =
+    Style.styleSheet
+        [ style None []
+        , style Main
+            [ Font.size 12
+            , Color.text Color.charcoal
+            , Color.background Color.white
+            , Font.typeface fontFamily      
+            ]
+        , style Cell
+            [ cursor "pointer"
+            , hover [ Color.background <| Color.grayscale 0.1 ]
+            ]
+        , style CheckedCell
+            [ Border.right 2.0
+            , Border.solid
+            , Color.border Color.black
+            ]
+        , style Green
+            [ Color.text Color.white
+            , Color.background Color.green
+            , hover 
+                [ Color.background <| Color.black ] 
+            ]
+        , style Red 
+            [ Color.text Color.white
+            , Color.background Color.red 
+            , hover 
+                [ Color.background <| Color.black ]
+            ]
+        , style EditIcon
+            [ cursor "pointer" ]
+        , style DragHover
+            [ Color.background <| Color.grayscale 0.1 ]
+        , style RawData
+            [ Font.size 10 ]
+        ]
+
+
+dropZoneDefault : Html.Attribute a
+dropZoneDefault =
+    HtA.style
+        [ ( "height", "120px" )
+        , ( "border-radius", "10px" )
+        , ( "border", "3px dashed steelblue" )
+        ]
+
+
+dropZoneHover : Html.Attribute a
+dropZoneHover =
+    HtA.style
+        [ ( "height", "120px" )
+        , ( "border-radius", "10px" )
+        , ( "border", "3px dashed red" )
+        ]
