@@ -33,8 +33,13 @@ update msg model =
             in
                 ( { model | path = newPath, hash = hash }, Cmd.batch [ lsObjects hash ] )
 
-        Msgs.PathUpdate new_path ->
-            ( { model | path = new_path}, Cmd.none )
+        Msgs.PathUpdate response ->
+            case response of
+                Ok path ->
+                    ( { model | path = path }, Cmd.none )
+                Err error ->
+                    ( { model | data = Basics.toString <| error }, Cmd.none )
+
 
         Msgs.DagPut data ->
             ( model, Ports.sendData data )
@@ -93,7 +98,7 @@ update msg model =
                 , files = 
                     files
             }
-            , Cmd.batch <| List.map (\x -> addFiles x) files
+            , addFiles files model.link
             )
 
         Msgs.DnD a ->
@@ -112,8 +117,7 @@ update msg model =
                     model.node ++ [ link ]
             in
                 ( { model | node = newNode },
-                    chainRequests model.link.cid link.name [] model.path
-                        |> Result.withDefault [("",model.hash)]
+                    patchPath model.path [] model.link.cid
                         |> Task.attempt Msgs.PathUpdate )
 
         Msgs.GetModifiedObject response ->

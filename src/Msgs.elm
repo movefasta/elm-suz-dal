@@ -5,6 +5,7 @@ import RemoteData exposing (WebData)
 import Json.Encode exposing (Value)
 import DropZone exposing (DropZoneMessage(Drop))
 import FileReader exposing (NativeFile)
+import Http exposing (Error)
 
 type Msg 
     = UpdateQuery Hash
@@ -22,4 +23,4 @@ type Msg
     | AddLink (WebData Link)
     | GetModifiedObject (WebData Hash)
     | LsObjects Hash
-    | PathUpdate Path
+    | PathUpdate (Result Http.Error Path)

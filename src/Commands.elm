@@ -53,17 +53,49 @@ fileCat hash link =
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.UpdateNode
 -}
-addFiles : NativeFile -> Cmd Msg
-addFiles nf =
+
+addFiles : List NativeFile -> Link -> Path -> Cmd Msg
+addFiles nf_list object path =
+    (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
+        |> Task.andThen (patchObject object.cid)
+        |> Task.andThen (patchPath path [])
+        |> Task.attempt Msgs.PathUpdate
+
+patchObject : Hash -> List Link -> Task.Task Http.Error Hash
+patchObject parent links =
+    case links of
+        x :: xs ->
+            addLinkRequest parent x
+                |> Task.andThen (\hash -> patchObject hash xs)
+        [] -> 
+            Task.succeed parent
+
+patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
+patchPath acc path hash  =
+    case path of
+        (parentname, parenthash) :: xs ->
+            addLinkRequest parenthash { name = parentname, size = 0, cid = hash, obj_type = 2, status = Completed }
+            |> Task.andThen (\hash -> patchPath xs (acc ++ [(parentname, hash)]) hash )
+        [] ->
+            Task.succeed acc
+
+addFileRequest : NativeFile -> Task.Task Http.Error Link
+addFileRequest nf =
     let
         body =
-            Http.multipartBody
-            [ FileReader.filePart nf.name nf
-            ]
+            Http.multipartBody [ FileReader.filePart nf.name nf ]
     in
-        Http.post (ipfsApiUrl ++ "add" ++ "?progress=true") body fileLinkDecoder
-            |> RemoteData.sendRequest
-            |> Cmd.map Msgs.AddLink
+        Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
+            |> Http.toTask
+
+addLinkRequest : Hash -> Link -> Task.Task Http.Error Hash
+addLinkRequest parent_hash link =
+    Http.get ( ipfsApiUrl
+            ++ "object/patch/add-link?arg=" ++ parent_hash
+            ++ "&arg=" ++ link.name
+            ++ "&arg=" ++ link.cid )
+            (Decode.field "Hash" Decode.string)
+        |> Http.toTask
 
 
 -- IPFS OBJECT API REQUESTS
@@ -90,24 +122,6 @@ addLink node_hash name link_hash =
         ++ "&arg=" ++ name ) onlyHashDecoder
         |> RemoteData.sendRequest
         |> Cmd.map Msgs.GetModifiedObject
-
-addLinkRequest : Hash -> Name -> Hash -> Task.Task Http.Error Hash
-addLinkRequest parent_hash name hash =
-    Http.get ( ipfsApiUrl
-            ++ "object/patch/add-link?arg=" ++ parent_hash
-            ++ "&arg=" ++ name
-            ++ "&arg=" ++ hash )
-            (Decode.field "Hash" Decode.string)
-        |> Http.toTask
-
-chainRequests : Hash -> Name -> Path -> Path -> Task.Task Http.Error Path
-chainRequests new_cid name acc path =
-    case path of
-        (nodename, nodehash) :: xs ->
-            addLinkRequest nodehash name new_cid
-            |> Task.andThen (\ hash -> chainRequests hash nodename (acc ++ [(nodename, hash)]) xs )
-        [] ->
-            Task.succeed acc
 
 
 -- DECODERS 
