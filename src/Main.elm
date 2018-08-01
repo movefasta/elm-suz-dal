@@ -22,9 +22,9 @@ initHash =
 
 initLink : Link
 initLink =
-    { name = "имя ссылки"
-    , size = 0  
-    , cid = "адрес(мультихэш)"
+    { name = "Home"
+    , size = 0
+    , cid = initHash
     , obj_type = 2
     , status = Completed
     }
@@ -36,7 +36,7 @@ initModel =
     , node = []
     , link = initLink
     , raw_dag = RemoteData.Loading
-    , path = [ ( "Home", initHash ) ]
+    , path = []
     , draft = []
     , dropZone =
         DropZone.init

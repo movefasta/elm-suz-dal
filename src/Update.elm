@@ -13,12 +13,17 @@ import DropZone exposing (DropZoneMessage(Drop), dropZoneEventHandlers, isHoveri
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    let
+        defaultLink =
+            { name = "defaultLink", size = 0, cid = "", obj_type = 2, status = Completed }
+    in
+            
     case msg of
         Msgs.NoOp ->
             model ! []
 
         Msgs.UpdateQuery value ->
-            ( { model | hash = value, path = [ ( "Home", value ) ] }, previewGet value )
+            ( { model | hash = value }, previewGet value )
 
         Msgs.UpdateData value ->
             { model | data = value } ! []
@@ -33,13 +38,29 @@ update msg model =
             in
                 ( { model | path = newPath, hash = hash }, Cmd.batch [ lsObjects hash ] )
 
+        Msgs.DraftUpdate response ->
+            case response of
+                Ok links ->
+                    ( { model | draft = model.draft ++ links }, 
+                        Task.attempt Msgs.PatchObjectUpdate <| patchObject model.link.cid links )
+                Err error ->
+                    ( { model | data = Basics.toString <| error }, Cmd.none )
+
+        Msgs.PatchObjectUpdate response ->
+            case response of
+                Ok hash ->
+                    ( { model | hash = hash }, 
+                        Cmd.batch [ lsObjects hash, 
+                                    Task.attempt Msgs.PathUpdate <| patchPath [] model.path hash ] )
+                Err error ->
+                    ( { model | data = Basics.toString <| error }, Cmd.none )
+
         Msgs.PathUpdate response ->
             case response of
                 Ok path ->
                     ( { model | path = path }, Cmd.none )
                 Err error ->
                     ( { model | data = Basics.toString <| error }, Cmd.none )
-
 
         Msgs.DagPut data ->
             ( model, Ports.sendData data )
@@ -53,13 +74,13 @@ update msg model =
                     RemoteData.withDefault "response fails" response
             in
                 ( { model | node = Result.withDefault 
-                    [ { name = "defaultLink", size = 0, cid = "", obj_type = 2, status = Completed } ]
+                    [ defaultLink ]
                     <| Decode.decodeString objectsDecoder object
                     , raw_dag = response
                          }, Cmd.none )
 
-        Msgs.PreviewGet preview_link ->
-            ( { model | link = preview_link, data = preview_link.name }, previewGet preview_link.cid )
+        Msgs.PreviewGet link ->
+            ( { model | link = link, data = link.name }, previewGet link.cid )
 
         Msgs.UpdatePreview response ->
             ( { model | raw_dag = response }, Cmd.none )
@@ -98,7 +119,7 @@ update msg model =
                 , files = 
                     files
             }
-            , addFiles files model.link
+            , addFiles files model.link model.path
             )
 
         Msgs.DnD a ->
@@ -107,18 +128,13 @@ update msg model =
 
         Msgs.AddLink response ->
             let
-                defaultLink =
-                    { name = "", size = 0, cid = "", obj_type = 2, status = Completed }                    
-
                 link =
                     RemoteData.withDefault defaultLink response
 
                 newNode =
                     model.node ++ [ link ]
             in
-                ( { model | node = newNode },
-                    patchPath model.path [] model.link.cid
-                        |> Task.attempt Msgs.PathUpdate )
+                ( { model | node = newNode }, Cmd.none)
 
         Msgs.GetModifiedObject response ->
             let

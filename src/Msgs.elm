@@ -24,3 +24,5 @@ type Msg
     | GetModifiedObject (WebData Hash)
     | LsObjects Hash
     | PathUpdate (Result Http.Error Path)
+    | DraftUpdate (Result Http.Error (List Link))
+    | PatchObjectUpdate (Result Http.Error Hash)

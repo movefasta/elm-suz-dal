@@ -10,6 +10,7 @@ import RemoteData
 import Result
 import FileReader exposing (NativeFile, filePart)
 import Task
+import Json.Decode.Extra as DecodeExtra exposing (parseInt)
 
 -- URL's
 
@@ -54,13 +55,12 @@ fileCat hash link =
         |> Cmd.map Msgs.UpdateNode
 -}
 
+
 addFiles : List NativeFile -> Link -> Path -> Cmd Msg
 addFiles nf_list object path =
     (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
-        |> Task.andThen (patchObject object.cid)
-        |> Task.andThen (patchPath path [])
-        |> Task.attempt Msgs.PathUpdate
-
+        |> Task.attempt Msgs.DraftUpdate
+        
 patchObject : Hash -> List Link -> Task.Task Http.Error Hash
 patchObject parent links =
     case links of
@@ -71,13 +71,14 @@ patchObject parent links =
             Task.succeed parent
 
 patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
-patchPath acc path hash  =
-    case path of
+patchPath acc path hash =
+    case List.reverse path of
         (parentname, parenthash) :: xs ->
             addLinkRequest parenthash { name = parentname, size = 0, cid = hash, obj_type = 2, status = Completed }
-            |> Task.andThen (\hash -> patchPath xs (acc ++ [(parentname, hash)]) hash )
+            |> Task.andThen (\hash -> patchPath ([(parentname, hash)] ++ acc ) xs hash )
         [] ->
-            Task.succeed acc
+            List.reverse acc 
+            |> Task.succeed
 
 addFileRequest : NativeFile -> Task.Task Http.Error Link
 addFileRequest nf =
@@ -124,7 +125,7 @@ addLink node_hash name link_hash =
         |> Cmd.map Msgs.GetModifiedObject
 
 
--- DECODERS 
+-- DECODERS
 
 nodeDecoder : Decode.Decoder Object -> Value -> Result String Object
 nodeDecoder objectDecoder value =
@@ -142,10 +143,13 @@ fileLinkDecoder : Decode.Decoder Link
 fileLinkDecoder =
     decode Link
         |> required "Name" Decode.string
-        |> required "Size" Decode.int
+        |> required "Size" sizeDecoder
         |> required "Hash" Decode.string
         |> optional "Type" Decode.int 2
         |> hardcoded Completed
+sizeDecoder : Decode.Decoder Int
+sizeDecoder =
+    Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
 
 {-}
 
@@ -179,7 +183,6 @@ onlyHashDecoder =
 
 
 -- ENCODERS
-
 
 objectEncoder : Data -> List Link -> Value
 objectEncoder data list =
