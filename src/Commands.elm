@@ -72,13 +72,17 @@ patchObject parent links =
 
 patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
 patchPath acc path hash =
-    case List.reverse path of
-        (parentname, parenthash) :: xs ->
-            addLinkRequest parenthash { name = parentname, size = 0, cid = hash, obj_type = 2, status = Completed }
-            |> Task.andThen (\hash -> patchPath ([(parentname, hash)] ++ acc ) xs hash )
+    case path of
+        (childname, childhash) :: (parentname, parenthash) :: xs ->
+            addLinkRequest parenthash 
+                { name = childname, size = 0, cid = hash, obj_type = 2, status = Completed }
+                |> Task.andThen 
+                    (\hash -> 
+                        patchPath (acc ++ [(parentname, hash)]) ((parentname, parenthash) :: xs) hash )
+        x :: [] -> 
+            Task.succeed acc
         [] ->
-            List.reverse acc 
-            |> Task.succeed
+            Task.succeed acc
 
 addFileRequest : NativeFile -> Task.Task Http.Error Link
 addFileRequest nf =
@@ -147,6 +151,7 @@ fileLinkDecoder =
         |> required "Hash" Decode.string
         |> optional "Type" Decode.int 2
         |> hardcoded Completed
+
 sizeDecoder : Decode.Decoder Int
 sizeDecoder =
     Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
@@ -170,7 +175,16 @@ linkDecoder =
         |> requiredAt ["Cid", "/"] Decode.string
         |> optional "Description" Decode.string ""
         |> hardcoded Completed
+
+objectStatDecoder : Decode.Decoder 
+{"Hash":"QmaaWo8DMGGkdVvMFz7Ld4DzdeyhRHNGy2aBpM7TcCKWLu",
+"NumLinks":7,
+"BlockSize":423,
+"LinksSize":421,
+"DataSize":2,
+"CumulativeSize":234493}
 -}
+
 cidDecoder : Decode.Decoder Cid
 cidDecoder =
     decode Cid
@@ -232,7 +246,8 @@ linkApiEncoderPB link =
 
 -- HELPERS
 
--- add node to path while going deep inside dag
+-- navigation in breadcrumbs
+
 pathUpdate : Node -> List Node -> List Node -> List Node
 pathUpdate node acc path =
     case path of
@@ -243,6 +258,19 @@ pathUpdate node acc path =
                 False -> 
                     pathUpdate node (acc ++ [x]) xs 
         [] -> acc ++ [node]
+
+
+pathStackUpdate : Node -> List Node -> List Node
+pathStackUpdate node path =
+    case path of
+        x :: xs -> 
+            case x == node of
+                True -> 
+                    path
+                False -> 
+                    pathStackUpdate node xs 
+        [] -> [node] ++ path
+
 
 
 

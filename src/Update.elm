@@ -34,9 +34,15 @@ update msg model =
         Msgs.DagGet name hash ->
             let
                 newPath =
-                    pathUpdate (name, hash) [] model.path
+                    pathStackUpdate (name, hash) model.path
             in
                 ( { model | path = newPath, hash = hash }, Cmd.batch [ lsObjects hash ] )
+
+        Msgs.PathInit hash ->
+            ( { model | path = [("Home", hash)] }, lsObjects hash )
+
+        Msgs.AddNodeToPath (name, hash) ->
+            ( { model | path = (name, hash) :: model.path }, lsObjects hash )
 
         Msgs.DraftUpdate response ->
             case response of
@@ -49,47 +55,34 @@ update msg model =
         Msgs.PatchObjectUpdate response ->
             case response of
                 Ok hash ->
-                    ( { model | hash = hash }, 
-                        Cmd.batch [ lsObjects hash, 
-                                    Task.attempt Msgs.PathUpdate <| patchPath [] model.path hash ] )
+                    ( model, Cmd.batch [ lsObjects hash,
+                                Task.attempt Msgs.PathPatchUpdate 
+                                    <| patchPath [(model.link.name, hash)] model.path hash ] )
                 Err error ->
                     ( { model | data = Basics.toString <| error }, Cmd.none )
 
-        Msgs.PathUpdate response ->
+        Msgs.PathPatchUpdate response ->
             case response of
                 Ok path ->
                     ( { model | path = path }, Cmd.none )
                 Err error ->
                     ( { model | data = Basics.toString <| error }, Cmd.none )
 
-        Msgs.DagPut data ->
-            ( model, Ports.sendData data )
-
-        Msgs.DagPutPB data ->
-            ( model, Ports.sendDataPB data )
-
         Msgs.UpdateNode response ->
             let
                 object =
                     RemoteData.withDefault "response fails" response
+                
+                newNode =
+                    Result.withDefault [ defaultLink ] <| Decode.decodeString objectsDecoder object
             in
-                ( { model | node = Result.withDefault 
-                    [ defaultLink ]
-                    <| Decode.decodeString objectsDecoder object
-                    , raw_dag = response
-                         }, Cmd.none )
+                ( { model | node = newNode, draft = newNode, raw_dag = response }, Cmd.none )
 
         Msgs.PreviewGet link ->
             ( { model | link = link, data = link.name }, previewGet link.cid )
 
         Msgs.UpdatePreview response ->
             ( { model | raw_dag = response }, Cmd.none )
-
-        Msgs.UpdateDescription name ->
-            let
-                updateLink x = { x | name = name }
-            in
-                { model | link = updateLink model.link } ! []
 
         Msgs.UpdateLink link status ->
             let
@@ -142,8 +135,20 @@ update msg model =
             in
                 ( { model | hash = ipfs_hash }, Cmd.batch [ dagGet ipfs_hash ] )
 
+        Msgs.DagPut data ->
+            ( model, Ports.sendData data )
+
+        Msgs.DagPutPB data ->
+            ( model, Ports.sendDataPB data )
+
 
 {-
+
+        Msgs.UpdateDescription name ->
+            let
+                updateLink x = { x | name = name }
+            in
+                { model | link = updateLink model.link } ! []
 
         Msgs.GetObject response ->
             let

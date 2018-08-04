@@ -13,7 +13,7 @@ import DropZone
 
 init : ( Model, Cmd Msg )
 init =
-    ( initModel, Cmd.batch [ lsObjects initModel.hash, previewGet initModel.hash ] )
+    ( initModel, Cmd.batch [ lsObjects initModel.hash ] )
 
 
 initHash : Hash
@@ -36,7 +36,7 @@ initModel =
     , node = []
     , link = initLink
     , raw_dag = RemoteData.Loading
-    , path = []
+    , path = [("Home", initHash)]
     , draft = []
     , dropZone =
         DropZone.init

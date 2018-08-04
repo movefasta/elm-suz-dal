@@ -5,7 +5,7 @@ import DropZone
 import FileReader exposing (NativeFile)
 
 type alias Model =
-    { hash : Hash -- query hash
+    { hash : Hash -- query hash (root)
     , data : Data -- some data to send
     , node : List Link
     , link : Link

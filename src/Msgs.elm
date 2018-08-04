@@ -9,6 +9,7 @@ import Http exposing (Error)
 
 type Msg 
     = UpdateQuery Hash
+    | NoOp
     | UpdateData Data
     | DagGet Name Hash
     | DagPut Value
@@ -16,13 +17,13 @@ type Msg
     | PreviewGet Link
     | UpdateNode (WebData String)
     | UpdatePreview (WebData String)
-    | UpdateDescription Data
     | UpdateLink Link EntryStatus
-    | NoOp
     | DnD (DropZone.DropZoneMessage (List NativeFile))
     | AddLink (WebData Link)
     | GetModifiedObject (WebData Hash)
     | LsObjects Hash
-    | PathUpdate (Result Http.Error Path)
+    | PathPatchUpdate (Result Http.Error Path)
     | DraftUpdate (Result Http.Error (List Link))
     | PatchObjectUpdate (Result Http.Error Hash)
+    | PathInit Hash
+    | AddNodeToPath Node

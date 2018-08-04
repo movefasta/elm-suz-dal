@@ -27,7 +27,7 @@ view model =
     E.layout stylesheet <|
         E.column None [ padding 20, spacing 10 ] <|
             [ E.el None [] <| viewControls model
-            , E.el None [] <| viewPath model.path
+            , E.el None [] <| viewPath <| List.reverse model.path
             , E.row None [ spacing 20 ]
                 [ E.column None
                     [ spacing 5 ]
@@ -70,7 +70,7 @@ viewLinkProperties link =
                         , onEnter <| Msgs.UpdateLink link Completed
                         , Event.onBlur <| Msgs.UpdateLink link Completed
                         ]
-                        { onChange = Msgs.UpdateDescription
+                        { onChange = Msgs.UpdateData
                         , value = link.name
                         , label = 
                             Input.placeholder { label = Input.hiddenLabel <| "", text = "Текст" }
@@ -101,22 +101,19 @@ viewLink link =
                 [ padding 10
                 , minWidth (px 130)
                 , Event.onClick <| Msgs.PreviewGet link
-                , Event.onDoubleClick <| Msgs.DagGet link.name link.cid
+                , Event.onDoubleClick <| Msgs.AddNodeToPath (link.name, link.cid)
                 ]
                 <| E.paragraph None [] [ E.text link.name ]
 
 viewPath : List Node -> Element Styles variation Msg
 viewPath path =
     E.row None [] <|
-        List.foldr
-            (\( name, hash ) list ->
-                [ E.button None 
+        List.map
+            (\(name, hash) ->
+                E.button None 
                     [ Event.onClick <| Msgs.DagGet name hash ] 
                     <| E.text (name ++ " > ")
-                ]
-                    ++ list
             )
-            []
             path
 
 
@@ -125,7 +122,7 @@ viewControls model =
     E.row Main
         [ spacing 5 ]
         [ Input.text None
-            [ padding 5, onEnter <| Msgs.DagGet "Home" model.hash ]
+            [ padding 5, onEnter <| Msgs.PathInit model.hash ]
             { onChange = Msgs.UpdateQuery
             , value = model.hash
             , label = 
