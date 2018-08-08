@@ -38,6 +38,12 @@ update msg model =
             in
                 ( { model | path = newPath, hash = hash }, Cmd.batch [ lsObjects hash ] )
 
+        Msgs.FileCat hash ->
+            ( model, fileCat hash )
+
+        Msgs.FileGet response ->
+            ( { model | raw_dag = response }, Cmd.none)
+
         Msgs.PathInit hash ->
             ( { model | path = [("Home", hash)] }, lsObjects hash )
 
@@ -53,11 +59,21 @@ update msg model =
                     ( { model | data = Basics.toString <| error }, Cmd.none )
 
         Msgs.PatchObjectUpdate response ->
+            let
+                draft_link = 
+                    (model.link.name, model.link.cid)
+            in
             case response of
                 Ok hash ->
                     ( model, Cmd.batch [ lsObjects hash,
+                        case List.head model.path == Just draft_link of
+                            True ->
                                 Task.attempt Msgs.PathPatchUpdate 
-                                    <| patchPath [(model.link.name, hash)] model.path hash ] )
+                                    <| patchPath [(model.link.name, hash)] model.path hash
+                            False ->
+                                Task.attempt Msgs.PathPatchUpdate
+                                    <| patchPath [(model.link.name, hash)] ( [ draft_link ] ++ model.path ) hash
+                                     ] )
                 Err error ->
                     ( { model | data = Basics.toString <| error }, Cmd.none )
 

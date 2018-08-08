@@ -11,6 +11,7 @@ import Result
 import FileReader exposing (NativeFile, filePart)
 import Task
 import Json.Decode.Extra as DecodeExtra exposing (parseInt)
+import MimeType
 
 -- URL's
 
@@ -47,14 +48,24 @@ addText text =
         Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
             |> RemoteData.sendRequest
             |> Cmd.map Msgs.AddLink
-{-}
-fileCat : Hash -> Link -> Cmd Msg
-fileCat hash link =
-    Http.getString ( ipfsApiUrl ++ "cat?arg=" ++ hash ++ "/README.md" )
-        |> RemoteData.sendRequest
-        |> Cmd.map Msgs.UpdateNode
--}
 
+fileCat : Hash -> Cmd Msg
+fileCat hash =
+    Http.getString ( ipfsApiUrl ++ "cat?arg=" ++ hash )
+        |> RemoteData.sendRequest
+        |> Cmd.map Msgs.FileGet
+
+nativeFileDecoder : Decode.Decoder NativeFile
+nativeFileDecoder =
+    Decode.map4 NativeFile
+        (Decode.field "name" Decode.string)
+        (Decode.field "size" Decode.int)
+        mtypeDecoder
+        Decode.value
+
+mtypeDecoder : Decode.Decoder (Maybe MimeType.MimeType)
+mtypeDecoder =
+    Decode.map MimeType.parseMimeType (Decode.field "type" Decode.string)
 
 addFiles : List NativeFile -> Link -> Path -> Cmd Msg
 addFiles nf_list object path =
@@ -76,7 +87,7 @@ patchPath acc path hash =
         (childname, childhash) :: (parentname, parenthash) :: xs ->
             addLinkRequest parenthash 
                 { name = childname, size = 0, cid = hash, obj_type = 2, status = Completed }
-                |> Task.andThen 
+                |> Task.andThen
                     (\hash -> 
                         patchPath (acc ++ [(parentname, hash)]) ((parentname, parenthash) :: xs) hash )
         x :: [] -> 

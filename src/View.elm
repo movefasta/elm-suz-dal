@@ -35,13 +35,42 @@ view model =
                     ]
                 , E.column None
                     [ spacing 5 ]
-                    [ viewLinksByType 2 model.draft -- Show Files
+                    [ viewContent model.draft -- Show Files
                     , E.el None [] <| viewLinkProperties model.link
                     , E.el None [] <| maybeRemote viewRawDag model.raw_dag
                     , E.el None [] <| E.html <| renderDropZone model.dropZone
                     ]
                 ]
             ]
+
+viewContent : List Link -> Element Styles variation Msg
+viewContent links =
+    E.row None [ spacing 5, Element.Attributes.width fill ] <|
+        List.foldl
+            (\link list ->
+                if (link.obj_type == 2) then
+                    list ++ [ viewFile link ] 
+                else list
+                ) 
+            [] links
+
+viewFile : Link -> Element Styles variation Msg
+viewFile link =
+    let
+        link_src =
+            ("/ipfs/" ++ link.cid)
+    in
+    E.column None [] <| 
+        [ E.newTab link_src <| E.image None [Element.Attributes.width (px 150)] 
+            { src = link_src
+            , caption = "it's not an image" 
+            }
+        , E.button None
+            [ padding 2
+            , Event.onClick <| Msgs.FileCat link.cid
+            ]
+          <| E.text "cat_file"
+        ]
 
 viewRawDag : Data -> Element Styles variation Msg
 viewRawDag raw_dag =

@@ -27,3 +27,5 @@ type Msg
     | PatchObjectUpdate (Result Http.Error Hash)
     | PathInit Hash
     | AddNodeToPath Node
+    | FileCat Hash
+    | FileGet (WebData String)
