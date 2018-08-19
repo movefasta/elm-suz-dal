@@ -1,51 +1,50 @@
 module View exposing (..)
 
-import Html exposing (Html)
-import Html.Attributes as HtA exposing (width, height)
 import Models exposing (..)
 import Msgs exposing (Msg)
-import RemoteData exposing (WebData)
-import Json.Decode as Decode
-import Color
-import Element as E exposing (Attribute, Element)
-import Element.Attributes exposing (..)
+import Commands exposing (..)
+
+-- STYLISH ELEPHANTS LIBRARY
+import Element as E exposing (Element, Attribute, minimum, px, spacing, padding, width, height, fill, fillPortion)
 import Element.Events as Event
 import Element.Input as Input
-import Style exposing (..)
-import Style.Border as Border
-import Style.Color as Color
-import Style.Font as Font
-import Commands exposing (..)
+import Element.Border as Border
+import Element.Font as Font exposing (Font)
+import Element.Background as Background
+
+-- EXTERNAL LIBRARIES
+import Color exposing (Color)
+import Html exposing (Html)
+import Html.Attributes as HtA exposing (width, height)
+import RemoteData exposing (WebData)
 import Material.Icons.Image as Icon exposing (edit)
 import Svg exposing (svg)
 import DropZone exposing (dropZoneEventHandlers, isHovering)
 import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile)
 
-
 view : Model -> Html Msg
 view model =
-    E.layout stylesheet <|
-        E.column None [ padding 20, spacing 10 ] <|
-            [ E.el None [] <| viewControls model
-            , E.el None [] <| viewPath <| List.reverse model.path
-            , E.row None [ spacing 20 ]
-                [ E.column None
-                    [ spacing 5 ]
-                    [ viewLinksByType 1 model.node -- Show Directories
+    E.layout [ Font.size 12 ] <|
+        E.column []
+            [ E.el [] <| viewControls model
+            , E.el [] <| viewPath <| List.reverse model.path
+            , E.row [ E.width fill ]
+                [ E.column [ E.width ( fill |> E.maximum 170 ) ] 
+                    [ viewLinksByType 1 model.node
+                    , viewLinksByType 2 model.node
                     ]
-                , E.column None
-                    [ spacing 5 ]
+                , E.column []
                     [ viewContent model.draft -- Show Files
-                    , E.el None [] <| viewLinkProperties model.link
-                    , E.el None [] <| maybeRemote viewRawDag model.raw_dag
-                    , E.el None [] <| E.html <| renderDropZone model.dropZone
+                    , E.el [] <| viewLinkProperties model.link
+                    , E.el [] <| maybeRemote viewRawDag model.raw_dag
+                    , E.el [] <| E.html <| renderDropZone model.dropZone
                     ]
                 ]
             ]
 
-viewContent : List Link -> Element Styles variation Msg
+viewContent : List Link -> Element Msg
 viewContent links =
-    E.row None [ spacing 5, Element.Attributes.width fill ] <|
+    E.row [ spacing 5 ] <|
         List.foldl
             (\link list ->
                 if (link.obj_type == 2) then
@@ -54,31 +53,34 @@ viewContent links =
                 ) 
             [] links
 
-viewFile : Link -> Element Styles variation Msg
+viewFile : Link -> Element Msg
 viewFile link =
     let
         link_src =
-            ("/ipfs/" ++ link.cid)
-    in
-    E.column None [] <| 
-        [ E.newTab link_src <| E.image None [Element.Attributes.width (px 150)] 
-            { src = link_src
-            , caption = "it's not an image" 
+            { url = ("/ipfs/" ++ link.cid)
+            , label = E.text link.name
             }
-        , E.button None
+    in
+    E.column [] <| 
+        [ E.image [E.width (E.px 130)] 
+            { src = link_src.url
+            , description = "it's not an image" 
+            }
+        , E.el
             [ padding 2
             , Event.onClick <| Msgs.FileCat link.cid
             ]
           <| E.text "cat_file"
         ]
 
-viewRawDag : Data -> Element Styles variation Msg
+viewRawDag : Data -> Element Msg
 viewRawDag raw_dag =
-    E.el RawData [] <| E.paragraph None [ padding 5 ] <| [ E.text raw_dag ]
+    E.el [ Font.size 10 ] 
+        <| E.paragraph [ padding 5 ] [ E.text raw_dag ]
 
-viewLinksByType : Int -> List Link -> Element Styles variation Msg
+viewLinksByType : Int -> List Link -> Element Msg
 viewLinksByType obj_type links =
-    E.column None [ spacing 5 ] <|
+    E.column [] <|
         List.foldl
             (\link list ->
                 if (link.obj_type == obj_type) then
@@ -87,105 +89,112 @@ viewLinksByType obj_type links =
                 ) 
             [] links
 
-viewLinkProperties : Link -> Element Styles variation Msg
+viewLinkProperties : Link -> Element Msg
 viewLinkProperties link =
     let
         div =
             case link.status of 
                 Editing ->
-                    Input.text None
+                    Input.text
                         [ padding 5
-                        , id ("link-" ++ link.name)
-                        , onEnter <| Msgs.UpdateLink link Completed
-                        , Event.onBlur <| Msgs.UpdateLink link Completed
+                        , E.htmlAttribute <| HtA.id ("link-" ++ link.name)
+                        , Event.onLoseFocus <| Msgs.UpdateLink link Completed
                         ]
-                        { onChange = Msgs.UpdateData
-                        , value = link.name
-                        , label = 
-                            Input.placeholder { label = Input.hiddenLabel <| "", text = "Текст" }
-                        , options = []
+                        { onChange = Just Msgs.UpdateData
+                        , text = ""
+                        , placeholder = Just <| Input.placeholder [] <| E.text "Текст"
+                        , label = Input.labelLeft [] <| E.text "Editing"
                         }
                 Completed -> 
-                    E.el Cell [ padding 5 ] <| E.text link.name
+                    E.el [] <| E.text link.name
     in
-        E.column None 
+        E.column 
             [ spacing 5 ]
-            [ E.el Cell [ Event.onClick <| Msgs.UpdateLink link Editing ] <| div
-            , E.el None [ padding 5 ] <| E.text link.cid
+            [ E.el [ Event.onClick <| Msgs.UpdateLink link Editing ] <| div
+            , E.el [] <| E.text link.cid
             ]
 
 
-viewLink : Link -> Element Styles variation Msg
+viewLink : Link -> Element Msg
 viewLink link =
     let
-        style =
+        colorFill =
             case link.status of
-                Editing -> CheckedCell
+                Editing -> Background.color Color.lightGrey
                 _ -> case link.obj_type of
-                    1 -> Red
-                    2 -> Green
-                    _ -> Cell
+                    1 -> Background.color <| orange 0.7
+                    2 -> Background.color <| green 0.7
+                    _ -> Background.color <| Color.white
     in
-        E.el style
-                [ padding 10
-                , minWidth (px 130)
-                , Event.onClick <| Msgs.PreviewGet link
-                , Event.onDoubleClick <| Msgs.AddNodeToPath (link.name, link.cid)
-                ]
-                <| E.paragraph None [] [ E.text link.name ]
+        E.el
+            [ E.width E.fill
+            , E.pointer
+            , colorFill
+            , E.mouseOver [ Background.color <| Color.grayscale 0.4 ]
+            , padding 10
+            , Event.onClick <| Msgs.PreviewGet link
+            , Event.onDoubleClick <| Msgs.AddNodeToPath (link.name, link.cid)
+            ]
+            <| E.paragraph [] [ E.text link.name ] 
 
-viewPath : List Node -> Element Styles variation Msg
+viewPath : List Node -> Element Msg
 viewPath path =
-    E.row None [] <|
+    E.row [] <|
         List.map
             (\(name, hash) ->
-                E.button None 
-                    [ Event.onClick <| Msgs.DagGet name hash ] 
-                    <| E.text (name ++ " > ")
+                Input.button 
+                    []
+                    { label = E.text (name ++ " > ") 
+                    , onPress = Just <| Msgs.DagGet name hash
+                    }
             )
             path
 
 
-viewControls : Model -> Element Styles variation Msg
+viewControls : Model -> Element Msg
 viewControls model =
-    E.row Main
+    E.row
         [ spacing 5 ]
-        [ Input.text None
-            [ padding 5, onEnter <| Msgs.PathInit model.hash ]
-            { onChange = Msgs.UpdateQuery
-            , value = model.hash
-            , label = 
-                Input.placeholder
-                    { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Root hash"))
-                    , text = "" }
-                    , options = []
-                    }
-        , E.button Cell
+        [ Input.text
             [ padding 5
-            , Event.onClick <| Msgs.DagPut <| objectEncoder model.data model.node
+            , Event.onLoseFocus <| Msgs.PathInit model.hash 
             ]
-          <| E.text "dag-cbor put"
-        , E.button Cell
+            { onChange = Just Msgs.UpdateQuery
+            , text = model.hash
+            , placeholder = Just <| Input.placeholder [] <| E.text "Enter query hash here"
+            , label = Input.labelLeft [ padding 5 ] <| E.text "Root Hash"
+            }
+        , Input.button
             [ padding 5
-            , Event.onClick <| Msgs.DagGet "Home" model.hash
+            , Border.width 1
+            , Border.color Color.darkGrey
+            , E.mouseOver <| [ Background.color Color.lightGrey ]
             ]
-          <| E.text "dag get"
-        , E.button Cell
-            [ padding 5
-            , Event.onClick <| Msgs.DagPutPB <| objectEncoder model.data model.node
-            ]
-          <| E.text "dag-pb put"
-        , E.button Cell
-            [ padding 5
-            , Event.onClick <| Msgs.LsObjects model.hash
-            ]
-          <| E.text "ls"
+            { onPress = Just <| Msgs.DagPut <| objectEncoder model.data model.node 
+            , label = E.text "dag-cbor put"
+            }
+        , Input.button
+            [ padding 5 ]
+            { onPress = Just <| Msgs.DagGet "Home" model.hash 
+            , label = E.text "dag get"
+            }
+        , Input.button
+            [ padding 5 ]
+            { onPress = Just <| Msgs.DagPutPB <| objectEncoder model.data model.node 
+            , label = E.text "dag-pb put"
+            }
+        , Input.button
+            [ padding 5 ]
+            { onPress = Just <| Msgs.LsObjects model.hash 
+            , label = E.text "ls"
+            }
         ]
 
-editIcon : Link -> Element Styles variation Msg
+editIcon : Link -> Element Msg
 editIcon link =
-    E.el EditIcon
-        [ padding 5
+    E.el
+        [ E.pointer
+        , padding 5
         , Event.onClick <| Msgs.UpdateLink link Editing
         ] 
         <| E.html 
@@ -208,37 +217,27 @@ findLinkByName link_name object =
             Nothing
 
 
-onEnter : Msg -> Attribute variaton Msg
-onEnter msg =
-    let
-        isEnter code =
-            if code == 13 then
-                Decode.succeed msg
-            else
-                Decode.fail "not ENTER"
-    in
-        Event.on "keydown" (Decode.andThen isEnter Event.keyCode)
 
 
-viewData : Data -> Element Styles variation Msg
+viewData : Data -> Element Msg
 viewData data =
-    E.column Main
-        [ spacing 5 ]
-        [ Input.multiline None
+    E.column
+        [ Font.color Color.charcoal
+        , Background.color Color.white
+        , Font.family fontFamily      
+        ]
+        [ Input.multiline
             [ padding 5 ]
-            { onChange = Msgs.UpdateData
-            , value = data
-            , label =
-                Input.placeholder
-                    { label = Input.labelLeft (E.el None [ verticalCenter ] (E.text "Data"))
-                    , text = "Введите данные узла"
-                    }
-            , options = []
+            { onChange = Just Msgs.UpdateData
+            , placeholder = Just <| Input.placeholder [] <| E.text "Data" 
+            , label = Input.labelLeft [] <| E.text "Data" 
+            , text = "text field"
+            , spellcheck = False
             }
         ]
 
 
-maybeRemote : (a -> Element Styles variation Msg) -> WebData a -> Element Styles variation Msg
+maybeRemote : (a -> Element Msg) -> WebData a -> Element Msg
 maybeRemote viewFunction response =
     case response of
         RemoteData.NotAsked ->
@@ -271,69 +270,7 @@ renderZoneAttributes dropZoneModel =
         :: -- add the necessary DropZone event wiring
            dropZoneEventHandlers FileReader.parseDroppedFiles
 
--- STYLES
 
-fontFamily : List Font
-fontFamily =
-    [ Font.font "Source Sans Pro" 
-    , Font.font "Trebuchet MS"
-    , Font.font "Lucida Grande"
-    , Font.font "Bitstream Vera Sans"
-    , Font.font "Helvetica Neue"
-    , Font.font "sans-serif"
-    ]
-
-
-type Styles
-    = None
-    | Main
-    | Navigation
-    | Cell
-    | Red
-    | Green
-    | CheckedCell
-    | EditIcon
-    | DragHover
-    | RawData
-
-stylesheet : StyleSheet Styles variation
-stylesheet =
-    Style.styleSheet
-        [ style None []
-        , style Main
-            [ Font.size 12
-            , Color.text Color.charcoal
-            , Color.background Color.white
-            , Font.typeface fontFamily      
-            ]
-        , style Cell
-            [ cursor "pointer"
-            , hover [ Color.background <| Color.grayscale 0.1 ]
-            ]
-        , style CheckedCell
-            [ Border.right 2.0
-            , Border.solid
-            , Color.border Color.black
-            ]
-        , style Green
-            [ Color.text Color.white
-            , Color.background Color.green
-            , hover 
-                [ Color.background <| Color.black ] 
-            ]
-        , style Red 
-            [ Color.text Color.white
-            , Color.background Color.red 
-            , hover 
-                [ Color.background <| Color.black ]
-            ]
-        , style EditIcon
-            [ cursor "pointer" ]
-        , style DragHover
-            [ Color.background <| Color.grayscale 0.1 ]
-        , style RawData
-            [ Font.size 10 ]
-        ]
 
 
 dropZoneDefault : Html.Attribute a
@@ -352,3 +289,57 @@ dropZoneHover =
         , ( "border-radius", "10px" )
         , ( "border", "3px dashed red" )
         ]
+
+-- COLOR PROPERTIES
+
+alpha : Float
+alpha = 1.0
+
+orange : Float -> Color
+orange alpha = 
+    Color.rgba 255 122 0 alpha
+
+yellow : Float -> Color
+yellow alpha = 
+    Color.rgba 255 214 0 alpha
+
+green : Float -> Color
+green alpha = 
+    Color.rgba 152 237 0 alpha
+
+cyan : Float -> Color
+cyan alpha = 
+    Color.rgba 2 142 155 alpha
+
+blue : Float -> Color
+blue alpha = 
+    Color.rgba 62 19 175 alpha
+
+violet : Float -> Color
+violet alpha = 
+    Color.rgba 210 0 107 alpha
+
+-- FONTS
+
+fontFamily : List Font
+fontFamily =
+    [ Font.typeface "Source Sans Pro" 
+    , Font.typeface "Trebuchet MS"
+    , Font.typeface "Lucida Grande"
+    , Font.typeface "Bitstream Vera Sans"
+    , Font.typeface "Helvetica Neue"
+    , Font.typeface "sans-serif"
+    ]
+
+{-
+onEnter : Msg -> Attribute Msg
+onEnter msg =
+    let
+        isEnter code =
+            if code == 13 then
+                Decode.succeed msg
+            else
+                Decode.fail "not ENTER"
+    in
+        Event.on "keydown" (Decode.andThen isEnter Event.keyCode)
+-}
