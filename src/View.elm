@@ -24,10 +24,10 @@ import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile)
 
 view : Model -> Html Msg
 view model =
-    E.layout [ Font.size 12 ] <|
-        E.column []
-            [ E.el [] <| viewControls model
-            , E.el [] <| viewPath <| List.reverse model.path
+    E.layout [ E.inFront <| renderDropZone model.dropZone ] <|
+        E.column [ Font.size 12, spacing 10, padding 10 ]
+            [ viewControls model
+            , viewPath <| List.reverse model.path
             , E.row [ E.width fill ]
                 [ E.column [ E.width ( fill |> E.maximum 170 ) ] 
                     [ viewLinksByType 1 model.node
@@ -35,9 +35,8 @@ view model =
                     ]
                 , E.column []
                     [ viewContent model.draft -- Show Files
-                    , E.el [] <| viewLinkProperties model.link
-                    , E.el [] <| maybeRemote viewRawDag model.raw_dag
-                    , E.el [] <| E.html <| renderDropZone model.dropZone
+                    , viewLinkProperties model.link
+                    , maybeRemote viewRawDag model.raw_dag
                     ]
                 ]
             ]
@@ -114,7 +113,6 @@ viewLinkProperties link =
             , E.el [] <| E.text link.cid
             ]
 
-
 viewLink : Link -> Element Msg
 viewLink link =
     let
@@ -143,18 +141,27 @@ viewPath path =
         List.map
             (\(name, hash) ->
                 Input.button 
-                    []
+                    [ padding 5
+                    , E.mouseOver <| [ Background.color Color.lightGrey ]
+                    ]
                     { label = E.text (name ++ " > ") 
                     , onPress = Just <| Msgs.DagGet name hash
                     }
             )
             path
 
-
 viewControls : Model -> Element Msg
 viewControls model =
-    E.row
-        [ spacing 5 ]
+    let
+        style  =
+            [ padding 5
+            , Border.width 1
+            , Border.color Color.darkGrey
+            , E.mouseOver <| [ Background.color Color.lightGrey ]
+            ]
+     in
+        E.row
+        [ spacing 5, E.width fill ]
         [ Input.text
             [ padding 5
             , Event.onLoseFocus <| Msgs.PathInit model.hash 
@@ -165,26 +172,22 @@ viewControls model =
             , label = Input.labelLeft [ padding 5 ] <| E.text "Root Hash"
             }
         , Input.button
-            [ padding 5
-            , Border.width 1
-            , Border.color Color.darkGrey
-            , E.mouseOver <| [ Background.color Color.lightGrey ]
-            ]
+            style
             { onPress = Just <| Msgs.DagPut <| objectEncoder model.data model.node 
             , label = E.text "dag-cbor put"
             }
         , Input.button
-            [ padding 5 ]
+            style
             { onPress = Just <| Msgs.DagGet "Home" model.hash 
             , label = E.text "dag get"
             }
         , Input.button
-            [ padding 5 ]
+            style
             { onPress = Just <| Msgs.DagPutPB <| objectEncoder model.data model.node 
             , label = E.text "dag-pb put"
             }
         , Input.button
-            [ padding 5 ]
+            style
             { onPress = Just <| Msgs.LsObjects model.hash 
             , label = E.text "ls"
             }
@@ -203,7 +206,6 @@ editIcon link =
             , HtA.height 18
             ]
             [ Icon.edit Color.black 18 ]
-
 
 findLinkByName : Name -> WebData Object -> Maybe Link
 findLinkByName link_name object =
@@ -253,42 +255,59 @@ maybeRemote viewFunction response =
             E.text (toString error)
 
 
-renderDropZone : DropZone.Model -> Html Msg
+renderDropZone : DropZone.Model -> Element Msg
 renderDropZone dropZoneModel =
-    Html.map Msgs.DnD
-        (Html.div (renderZoneAttributes dropZoneModel) [])
+    E.map Msgs.DnD (E.el (renderZoneAttributesInFront dropZoneModel) <| 
+        E.el
+            [ Font.size 20
+            , E.centerX
+            , E.centerY
+            , Font.color Color.white
+            , Font.bold ]
+            <| E.text "DRAG HERE" )
 
 
-renderZoneAttributes : DropZone.Model -> List (Html.Attribute (DropZone.DropZoneMessage (List NativeFile)))
+renderZoneAttributes : DropZone.Model -> 
+    List (E.Attribute (DropZone.DropZoneMessage (List NativeFile)))
 renderZoneAttributes dropZoneModel =
     (if DropZone.isHovering dropZoneModel then
-        dropZoneHover
+        renderStyle Color.darkGrey
         -- style the dropzone differently depending on whether the user is hovering
-     else
-        dropZoneDefault
+    else
+        renderStyle Color.lightGrey
     )
-        :: -- add the necessary DropZone event wiring
-           dropZoneEventHandlers FileReader.parseDroppedFiles
+        ++ -- add the necessary DropZone event wiring
+           ( List.map E.htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
+
+renderZoneAttributesInFront : DropZone.Model -> 
+    List (E.Attribute (DropZone.DropZoneMessage (List NativeFile)))
+renderZoneAttributesInFront dropZoneModel =
+    (if DropZone.isHovering dropZoneModel then
+        renderStyleInFront 0.2
+        -- style the dropzone differently depending on whether the user is hovering
+    else
+        renderStyleInFront 0
+    )
+        ++ -- add the necessary DropZone event wiring
+           ( List.map E.htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
 
 
+renderStyle : Color -> List (E.Attribute a)
+renderStyle color =
+    [ E.width fill
+    , E.height fill
+    , Border.width 1
+    , Border.color color
+    , Border.dashed
+    ]
 
-
-dropZoneDefault : Html.Attribute a
-dropZoneDefault =
-    HtA.style
-        [ ( "height", "120px" )
-        , ( "border-radius", "10px" )
-        , ( "border", "3px dashed steelblue" )
-        ]
-
-
-dropZoneHover : Html.Attribute a
-dropZoneHover =
-    HtA.style
-        [ ( "height", "120px" )
-        , ( "border-radius", "10px" )
-        , ( "border", "3px dashed red" )
-        ]
+renderStyleInFront : Float -> List (E.Attribute a)
+renderStyleInFront transparency =
+    [ E.width fill
+    , E.height fill
+    , E.alpha transparency
+    , Background.color Color.black
+    ]
 
 -- COLOR PROPERTIES
 
