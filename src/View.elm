@@ -1,11 +1,9 @@
 module View exposing (..)
 
-import Models exposing (..)
-import Msgs exposing (Msg)
 import Commands exposing (..)
 
--- STYLISH ELEPHANTS LIBRARY
-import Element as E exposing (Element, Attribute, minimum, px, spacing, padding, width, height, fill, fillPortion)
+-- STYLISH ELEPHANTS
+import Element as E exposing (..)
 import Element.Events as Event
 import Element.Input as Input
 import Element.Border as Border
@@ -15,7 +13,7 @@ import Element.Background as Background
 -- EXTERNAL LIBRARIES
 import Color exposing (Color)
 import Html exposing (Html)
-import Html.Attributes as HtA exposing (width, height)
+import Html.Attributes exposing (id, style, width, height)
 import RemoteData exposing (WebData)
 import Material.Icons.Image as Icon exposing (edit)
 import Svg exposing (svg)
@@ -24,18 +22,29 @@ import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile)
 
 view : Model -> Html Msg
 view model =
-    E.layout [ E.inFront <| renderDropZone model.dropZone ] <|
-        E.column [ Font.size 12, spacing 10, padding 10 ]
+    layoutWith { options = 
+        [ focusStyle 
+            { borderColor = Nothing
+            , backgroundColor = Nothing
+            , shadow = Nothing 
+            } ] } [] <|
+        column
+            [ Font.size 12
+            , spacing 10
+            , padding 10
+            ]
             [ viewControls model
-            , viewPath <| List.reverse model.path
-            , E.row [ E.width fill ]
-                [ E.column [ E.width ( fill |> E.maximum 170 ) ] 
-                    [ viewLinksByType 1 model.node
-                    , viewLinksByType 2 model.node
-                    ]
-                , E.column []
-                    [ viewContent model.draft -- Show Files
-                    , viewLinkProperties model.link
+            , viewPath model.node []
+            , row
+                [ width fill ]
+                [ column
+                    [ width ( fill |> maximum 170 ) ] 
+                    [ viewTable model.node ]
+                , column
+                    [ spacing 10 ]
+                    [ renderDropZone model.dropZone
+                    , viewContent model.content -- Show Files
+                    , viewLinkProperties model model.link
                     , maybeRemote viewRawDag model.raw_dag
                     ]
                 ]
@@ -43,112 +52,157 @@ view model =
 
 viewContent : List Link -> Element Msg
 viewContent links =
-    E.row [ spacing 5 ] <|
-        List.foldl
-            (\link list ->
-                if (link.obj_type == 2) then
-                    list ++ [ viewFile link ] 
-                else list
-                ) 
-            [] links
+    row [ spacing 5 ] links
 
 viewFile : Link -> Element Msg
 viewFile link =
     let
         link_src =
             { url = ("/ipfs/" ++ link.cid)
-            , label = E.text link.name
+            , label = text link.name
             }
     in
-    E.column [] <| 
-        [ E.image [E.width (E.px 130)] 
+    column [] <| 
+        [ image [ width (px 130) ]
             { src = link_src.url
             , description = "it's not an image" 
             }
-        , E.el
+        , el
             [ padding 2
             , Event.onClick <| Msgs.FileCat link.cid
             ]
-          <| E.text "cat_file"
+          <| text "cat_file"
         ]
 
 viewRawDag : Data -> Element Msg
 viewRawDag raw_dag =
-    E.el [ Font.size 10 ] 
-        <| E.paragraph [ padding 5 ] [ E.text raw_dag ]
+    el 
+        [ Font.size 10
+        , htmlAttribute Html.Attributes.style "overflow-wrap" "break-word" 
+        ] <| 
+        paragraph [ padding 5 ] [ text raw_dag ]
 
-viewLinksByType : Int -> List Link -> Element Msg
-viewLinksByType obj_type links =
-    E.column [] <|
-        List.foldl
-            (\link list ->
-                if (link.obj_type == obj_type) then
-                    list ++ [ viewLink link ] 
-                else list
-                ) 
-            [] links
-
-viewLinkProperties : Link -> Element Msg
-viewLinkProperties link =
+viewLinkProperties : Model -> Link -> Element Msg
+viewLinkProperties model link =
     let
         div =
             case link.status of 
                 Editing ->
                     Input.text
                         [ padding 5
-                        , E.htmlAttribute <| HtA.id ("link-" ++ link.name)
+                        , htmlAttribute <| Html.Attributes.id ("link-" ++ link.name)
                         , Event.onLoseFocus <| Msgs.UpdateLink link Completed
+                        , Font.size 20
                         ]
                         { onChange = Just Msgs.UpdateData
-                        , text = ""
-                        , placeholder = Just <| Input.placeholder [] <| E.text "Текст"
-                        , label = Input.labelLeft [] <| E.text "Editing"
+                        , text = model.data
+                        , placeholder = Just <| Input.placeholder [] <| text "Текст"
+                        , label = Input.labelLeft [] <| text "Editing"
                         }
                 Completed -> 
-                    E.el [] <| E.text link.name
+                    el [] <| text link.name
     in
-        E.column 
+        column 
             [ spacing 5 ]
-            [ E.el [ Event.onClick <| Msgs.UpdateLink link Editing ] <| div
-            , E.el [] <| E.text link.cid
+            [ el [ Event.onClick <| Msgs.UpdateLink link Editing ] <| div
+            , el [] <| text link.cid
             ]
 
-viewLink : Link -> Element Msg
-viewLink link =
+viewCell : Color -> Node -> Element Msg
+viewCell color node =
+    paragraph
+        [ Background.color color
+        , centerX
+        , centerY
+        , padding 10
+        , htmlAttribute Html.Attributes.style "overflow-wrap" "break-word"
+        ] <|
+        text node.title
+
+viewSector : Node -> Element Msg
+viewSector node ->
     let
-        colorFill =
-            case link.status of
-                Editing -> Background.color Color.lightGrey
-                _ -> case link.obj_type of
-                    1 -> Background.color <| orange 0.7
-                    2 -> Background.color <| green 0.7
-                    _ -> Background.color <| Color.white
-    in
-        E.el
-            [ E.width E.fill
-            , E.pointer
-            , colorFill
-            , E.mouseOver [ Background.color <| Color.grayscale 0.4 ]
-            , padding 10
-            , Event.onClick <| Msgs.PreviewGet link
-            , Event.onDoubleClick <| Msgs.AddNodeToPath (link.name, link.cid)
-            ]
-            <| E.paragraph [] [ E.text link.name ] 
+        color i =
+            case i of
+                0 -> white
+                1 -> orange
+                2 -> yellow
+                3 -> green
+                4 -> cyan
+                5 -> blue
+                6 -> violet
 
-viewPath : List Node -> Element Msg
-viewPath path =
-    E.row [] <|
-        List.map
-            (\(name, hash) ->
-                Input.button 
-                    [ padding 5
-                    , E.mouseOver <| [ Background.color Color.lightGrey ]
-                    ]
-                    { label = E.text (name ++ " > ") 
-                    , onPress = Just <| Msgs.DagGet name hash
-                    }
-            )
-            path
+        childMap child =
+            case ( String.toInt child.name ) of
+                Ok int ->
+                    row [ Background.color Color.white ]
+                        [ el [] <| text node.title
+                        , row
+                            [ spacing 5
+                            , padding 5
+                            ] <|
+                            viewRow List.map (\x -> viewCell (color int) x) child.children
+                        ]
+                Err _ ->
+                    none
+    in
+    column 
+        [ Border.width 1
+        , Border.color Color.darkGrey
+        ] 
+        [ el 
+            [ Font.size 
+            , centerX
+            , centerY
+            ] <|
+            text node.title
+        , column [] List.map childMap node.children
+        ]
+
+viewTable : Node -> Element Msg
+viewTable node =
+    let
+        childMap child =
+            case ( String.toInt child.name ) of
+                Ok int ->
+                    viewSector child
+                Err _ ->
+                    none
+    in
+    column [ spacing 15 ] <| List.map childMap node.children
+
+viewCell : Link -> Element Msg
+viewCell link =
+    el
+        [ width fill
+        , pointer
+        , colorFill
+        , mouseOver [ Background.color <| Color.grayscale 0.2 ]
+        , padding 10
+        , Event.onClick <| Msgs.PreviewGet link
+        , Event.onDoubleClick <| Msgs.UpdateQuery link.name
+        ] <|
+        paragraph [] [ text link.name ] 
+
+-- navigation in breadcrumbs
+
+viewPath : Node -> List (Element Msg) -> Element Msg
+viewPath node acc =
+    let
+        div =
+            Input.button 
+                [ padding 5
+                , mouseOver <| [ Background.color Color.lightGrey ]
+                ]
+                { label = text (node.title ++ " > ")
+                , onPress = Just <| Msgs.GetNode node.cid
+                }
+    in
+    case node.parent of
+        Just parent ->
+            viewPath parent ([ div ] :: acc)
+        Nothing ->
+            row [] acc
 
 viewControls : Model -> Element Msg
 viewControls model =
@@ -157,53 +211,53 @@ viewControls model =
             [ padding 5
             , Border.width 1
             , Border.color Color.darkGrey
-            , E.mouseOver <| [ Background.color Color.lightGrey ]
+            , mouseOver <| [ Background.color Color.lightGrey ]
             ]
      in
-        E.row
-        [ spacing 5, E.width fill ]
+        row
+        [ spacing 5, width fill ]
         [ Input.text
             [ padding 5
-            , Event.onLoseFocus <| Msgs.PathInit model.hash 
+            , Event.onLoseFocus <| Msgs.PathInit model.hash
             ]
             { onChange = Just Msgs.UpdateQuery
             , text = model.hash
-            , placeholder = Just <| Input.placeholder [] <| E.text "Enter query hash here"
-            , label = Input.labelLeft [ padding 5 ] <| E.text "Root Hash"
+            , placeholder = Just <| Input.placeholder [] <| text "Enter query hash here"
+            , label = Input.labelLeft [ padding 5 ] <| text "Root Hash"
             }
         , Input.button
             style
             { onPress = Just <| Msgs.DagPut <| objectEncoder model.data model.node 
-            , label = E.text "dag-cbor put"
+            , label = text "dag-cbor put"
             }
         , Input.button
             style
             { onPress = Just <| Msgs.DagGet "Home" model.hash 
-            , label = E.text "dag get"
+            , label = text "dag get"
             }
         , Input.button
             style
-            { onPress = Just <| Msgs.DagPutPB <| objectEncoder model.data model.node 
-            , label = E.text "dag-pb put"
+            { onPress = Just <| Msgs.DagPutPB <| dagNodePbEncoder model.node 
+            , label = text "dag-pb put"
             }
         , Input.button
             style
             { onPress = Just <| Msgs.LsObjects model.hash 
-            , label = E.text "ls"
+            , label = text "ls"
             }
         ]
 
 editIcon : Link -> Element Msg
 editIcon link =
-    E.el
-        [ E.pointer
+    el
+        [ pointer
         , padding 5
         , Event.onClick <| Msgs.UpdateLink link Editing
         ] 
-        <| E.html 
+        <| html 
         <| Svg.svg 
-            [ HtA.width 18
-            , HtA.height 18
+            [ Html.Attributes.width 18
+            , Html.Attributes.height 18
             ]
             [ Icon.edit Color.black 18 ]
 
@@ -218,12 +272,9 @@ findLinkByName link_name object =
         Nothing ->
             Nothing
 
-
-
-
 viewData : Data -> Element Msg
 viewData data =
-    E.column
+    column
         [ Font.color Color.charcoal
         , Background.color Color.white
         , Font.family fontFamily      
@@ -231,83 +282,61 @@ viewData data =
         [ Input.multiline
             [ padding 5 ]
             { onChange = Just Msgs.UpdateData
-            , placeholder = Just <| Input.placeholder [] <| E.text "Data" 
-            , label = Input.labelLeft [] <| E.text "Data" 
+            , placeholder = Just <| Input.placeholder [] <| text "Data" 
+            , label = Input.labelLeft [] <| text "Data" 
             , text = "text field"
             , spellcheck = False
             }
         ]
 
-
 maybeRemote : (a -> Element Msg) -> WebData a -> Element Msg
 maybeRemote viewFunction response =
     case response of
         RemoteData.NotAsked ->
-            E.text ""
+            text ""
 
         RemoteData.Loading ->
-            E.text "Loading..."
+            text "Loading..."
 
         RemoteData.Success object ->
             viewFunction object
 
         RemoteData.Failure error ->
-            E.text (toString error)
+            text (toString error)
 
 
-renderDropZone : DropZone.Model -> Element Msg
+renderDropZone : DropZonModel -> Element Msg
 renderDropZone dropZoneModel =
-    E.map Msgs.DnD (E.el (renderZoneAttributesInFront dropZoneModel) <| 
-        E.el
+    map Msgs.DnD (el (renderZoneAttributes dropZoneModel) <| 
+        el
             [ Font.size 20
-            , E.centerX
-            , E.centerY
+            , centerX
+            , centerY
             , Font.color Color.white
             , Font.bold ]
-            <| E.text "DRAG HERE" )
+            <| text "DRAG HERE" )
 
-
-renderZoneAttributes : DropZone.Model -> 
-    List (E.Attribute (DropZone.DropZoneMessage (List NativeFile)))
+renderZoneAttributes : DropZonModel -> 
+    List (Attribute (DropZonDropZoneMessage (List NativeFile)))
 renderZoneAttributes dropZoneModel =
-    (if DropZone.isHovering dropZoneModel then
+    (if DropZonisHovering dropZoneModel then
         renderStyle Color.darkGrey
         -- style the dropzone differently depending on whether the user is hovering
     else
         renderStyle Color.lightGrey
     )
         ++ -- add the necessary DropZone event wiring
-           ( List.map E.htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
+           ( List.map htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
 
-renderZoneAttributesInFront : DropZone.Model -> 
-    List (E.Attribute (DropZone.DropZoneMessage (List NativeFile)))
-renderZoneAttributesInFront dropZoneModel =
-    (if DropZone.isHovering dropZoneModel then
-        renderStyleInFront 0.2
-        -- style the dropzone differently depending on whether the user is hovering
-    else
-        renderStyleInFront 0
-    )
-        ++ -- add the necessary DropZone event wiring
-           ( List.map E.htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
-
-
-renderStyle : Color -> List (E.Attribute a)
+renderStyle : Color -> List (Attribute a)
 renderStyle color =
-    [ E.width fill
-    , E.height fill
+    [ width fill
+    , height fill
     , Border.width 1
     , Border.color color
     , Border.dashed
     ]
 
-renderStyleInFront : Float -> List (E.Attribute a)
-renderStyleInFront transparency =
-    [ E.width fill
-    , E.height fill
-    , E.alpha transparency
-    , Background.color Color.black
-    ]
 
 -- COLOR PROPERTIES
 
@@ -351,14 +380,49 @@ fontFamily =
     ]
 
 {-
+
+viewPath : List Node -> Element Msg
+viewPath path =
+    row [] <|
+        List.map
+            (\(name, hash) ->
+                Input.button 
+                    [ padding 5
+                    , mouseOver <| [ Background.color Color.lightGrey ]
+                    ]
+                    { label = text (name ++ " > ") 
+                    , onPress = Just <| Msgs.DagGet name hash
+                    }
+            )
+            path
+renderStyleInFront : Float -> List (Attribute a)
+renderStyleInFront transparency =
+    [ width fill
+    , height fill
+    , alpha transparency
+    , Background.color Color.black
+    ]
+
 onEnter : Msg -> Attribute Msg
 onEnter msg =
     let
         isEnter code =
             if code == 13 then
-                Decode.succeed msg
+                Decodsucceed msg
             else
-                Decode.fail "not ENTER"
+                Decodfail "not ENTER"
     in
-        Event.on "keydown" (Decode.andThen isEnter Event.keyCode)
+        Event.on "keydown" (DecodandThen isEnter Event.keyCode)
+
+renderZoneAttributesInFront : DropZonModel -> 
+    List (Attribute (DropZonDropZoneMessage (List NativeFile)))
+renderZoneAttributesInFront dropZoneModel =
+    (if DropZonisHovering dropZoneModel then
+        renderStyleInFront 0.2
+        -- style the dropzone differently depending on whether the user is hovering
+    else
+        renderStyleInFront 0
+    )
+        ++ -- add the necessary DropZone event wiring
+           ( List.map htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
 -}

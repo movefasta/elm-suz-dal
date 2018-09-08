@@ -1,8 +1,6 @@
 module Update exposing (..)
 
 import Commands exposing (..)
-import Models exposing (..)
-import Msgs exposing (Msg)
 import RemoteData
 import Json.Decode as Decode
 import Ports
@@ -17,19 +15,20 @@ update msg model =
         defaultLink =
             { name = "defaultLink", size = 0, cid = "", obj_type = 2, status = Completed }
     in
-            
     case msg of
         Msgs.NoOp ->
             model ! []
 
         Msgs.UpdateQuery value ->
-            ( { model | hash = value }, previewGet value )
+            let
+                query =
+                    pathToUrl model.path                    
+            in
+                ( { model | hash = query ++ value }, previewGet value )
 
         Msgs.UpdateData value ->
             { model | data = value } ! []
-        -- api/v0/ls?arg=hash
-        Msgs.LsObjects hash ->
-            ( model, lsObjects hash )                        
+                     
         -- api/v0/dag/get?arg=hash
         Msgs.DagGet name hash ->
             let
@@ -45,7 +44,7 @@ update msg model =
             ( { model | raw_dag = response }, Cmd.none)
 
         Msgs.PathInit hash ->
-            ( { model | path = [("Home", hash)] }, lsObjects hash )
+            ( { model, getObject hash )
 
         Msgs.AddNodeToPath (name, hash) ->
             ( { model | path = (name, hash) :: model.path }, lsObjects hash )
@@ -90,7 +89,7 @@ update msg model =
                     RemoteData.withDefault "response fails" response
                 
                 newNode =
-                    Result.withDefault [ defaultLink ] <| Decode.decodeString objectsDecoder object
+                    Result.withDefault [ defaultLink ] <| Decode.decodeString objectDecoder object
             in
                 ( { model | node = newNode, draft = newNode, raw_dag = response }, Cmd.none )
 
@@ -133,7 +132,6 @@ update msg model =
 
         Msgs.DnD a ->
             ( { model | dropZone = DropZone.update a model.dropZone }, Cmd.none )
-
 
         Msgs.AddLink response ->
             let
