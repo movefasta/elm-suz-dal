@@ -1,6 +1,17 @@
 module View exposing (..)
 
-import Commands exposing (..)
+import Ports
+
+-- ELM CORE LIBS
+import Http
+import Json.Decode as Decode
+import Json.Decode.Pipeline exposing (decode, required, hardcoded, optional, requiredAt)
+import Json.Encode as Encode exposing (Value, object)
+import Task
+import Result
+import Html exposing (Html)
+import Html.Attributes
+-- import Dom
 
 -- STYLISH ELEPHANTS
 import Element as E exposing (..)
@@ -12,13 +23,164 @@ import Element.Background as Background
 
 -- EXTERNAL LIBRARIES
 import Color exposing (Color)
-import Html exposing (Html)
-import Html.Attributes exposing (id, style, width, height)
 import RemoteData exposing (WebData)
 import Material.Icons.Image as Icon exposing (edit)
 import Svg exposing (svg)
 import DropZone exposing (dropZoneEventHandlers, isHovering)
-import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile)
+import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile, filePart)
+import Json.Decode.Extra as DecodeExtra exposing (parseInt)
+import MimeType exposing (MimeType, MimeText)
+
+-- CONSTANTS
+
+ipfsApiUrl : String
+ipfsApiUrl = 
+    "http://localhost:5001/api/v0/"
+
+ipfsGatewayUrl : String
+ipfsGatewayUrl = 
+    "http://localhost:8080/ipfs/"
+
+defaultNode : Node
+defaultNode =
+    { name = "ROOT"
+    , cid = "QmaaWo8DMGGkdVvMFz7Ld4DzdeyhRHNGy2aBpM7TcCKWLu"
+    , size = 0
+    , children = Children []
+    , parent = Nothing
+    , content = []
+    , title = "THERE IS NO NODE"
+    }
+
+
+type alias Model =
+    { root : Hash -- query hash (root)
+    , data : Data -- some data to send
+    , nodes : List Node
+    , content : List File -- file list
+    , path : List Node -- dag nodes path
+    , raw_dag : WebData String -- daw dag for response debugging
+    , dropZone :
+        DropZone.Model
+    , files_to_add : List NativeFile
+    }
+
+type Status
+    = Editing
+    | Completed
+    | Selected
+
+type alias Node =
+        { name : String
+        , cid : String
+        , size : Int
+        , children : Children
+        , parent : Maybe Parent
+        , content : List File
+        , title : String
+        }
+
+type Children = Children (List Node)
+type Parent = Parent Node
+
+type alias File =
+    { name : String
+    , cid : String
+    , size : Int
+    , mimetype : MimeType
+    , status : Status
+    }
+
+-- OBJECT API TYPES FOR HANDLING IPFS RESPONSES
+
+type alias Object =
+    { data : String
+    , links : List Link
+    }
+
+type alias ModifiedObject =
+    { hash : Hash
+    , links : List Link
+    }
+
+type alias Link =
+    { name : String
+    , size : Int
+    , cid : String
+    }
+
+type alias Hash = 
+    String
+
+type alias Data =
+    String
+
+type Msg 
+    = NoOp
+    | UpdateQuery String
+    | UpdateData String
+    | GetNode Hash
+    | ObjectPut Value
+    | UpdateNode (WebData Object)
+    | AddFile (Result Http.Error Link)
+    | AddText String
+    | GetModifiedObject (WebData Hash)
+    | DraftUpdate (Result Http.Error (List Link))
+    | PatchObjectUpdate (Result Http.Error Hash)
+    | FileCat Hash
+    | DnD (DropZone.DropZoneMessage (List NativeFile))
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    let
+        defaultFile =
+            { name = "defaultLink", size = 0, cid = "", obj_type = 2, status = Completed }
+    in
+    case msg of
+        NoOp ->
+            model ! []
+
+        UpdateQuery hash ->
+            ( { model | root = hash }, Cmd.none )
+
+        UpdateData text ->
+            { model | data = text } ! []
+                     
+        -- api/v0/object/get?arg=hash
+        GetNode hash ->
+            ( model, getNode hash )
+
+        AddText text ->
+            ( model, addText text )
+
+        ObjectPut value ->
+            ( model, Ports.sendData value )
+
+        AddFile response ->
+            case response of
+                Ok link ->
+                    let
+                        file = File link.name link.cid link.size (MimeType.Text MimeType.PlainText) Completed
+                    in    
+                        ( { model | content = ( file :: model.content ) }, Cmd.none )
+                Err _ ->
+                    ( model, Cmd.none )
+
+        DnD (DropZone.Drop files) ->
+            ( { model
+                | dropZone =
+                    DropZone.update (DropZone.Drop files) model.dropZone
+                , files_to_add = 
+                    files
+            }
+            , addFiles files
+            )
+
+        DnD a ->
+            ( { model | dropZone = DropZone.update a model.dropZone }, Cmd.none )
+
+--VIEW
 
 view : Model -> Html Msg
 view model =
@@ -34,32 +196,27 @@ view model =
             , padding 10
             ]
             [ viewControls model
-            , viewPath model.node []
+            , viewPath (Maybe.withDefault defaultNode <| List.head model.nodes) []
             , row
                 [ width fill ]
                 [ column
                     [ width ( fill |> maximum 170 ) ] 
-                    [ viewTable model.node ]
+                    [ viewTable model.nodes ]
                 , column
                     [ spacing 10 ]
-                    [ renderDropZone model.dropZone
-                    , viewContent model.content -- Show Files
-                    , viewLinkProperties model model.link
+                    [ column [] <| List.map viewFile model.content -- Show Files
+                    , renderDropZone model.dropZone
                     , maybeRemote viewRawDag model.raw_dag
                     ]
                 ]
             ]
 
-viewContent : List Link -> Element Msg
-viewContent links =
-    row [ spacing 5 ] links
-
-viewFile : Link -> Element Msg
-viewFile link =
+viewFile : File -> Element Msg
+viewFile file =
     let
         link_src =
-            { url = ("/ipfs/" ++ link.cid)
-            , label = text link.name
+            { url = ("/ipfs/" ++ file.cid)
+            , label = text file.cid
             }
     in
     column [] <| 
@@ -69,7 +226,7 @@ viewFile link =
             }
         , el
             [ padding 2
-            , Event.onClick <| Msgs.FileCat link.cid
+            , Event.onClick <| FileCat file.cid
             ]
           <| text "cat_file"
         ]
@@ -78,50 +235,27 @@ viewRawDag : Data -> Element Msg
 viewRawDag raw_dag =
     el 
         [ Font.size 10
-        , htmlAttribute Html.Attributes.style "overflow-wrap" "break-word" 
+        , htmlAttribute <| Html.Attributes.style [ ( "overflow-wrap", "break-word" ) ] 
         ] <| 
         paragraph [ padding 5 ] [ text raw_dag ]
 
-viewLinkProperties : Model -> Link -> Element Msg
-viewLinkProperties model link =
-    let
-        div =
-            case link.status of 
-                Editing ->
-                    Input.text
-                        [ padding 5
-                        , htmlAttribute <| Html.Attributes.id ("link-" ++ link.name)
-                        , Event.onLoseFocus <| Msgs.UpdateLink link Completed
-                        , Font.size 20
-                        ]
-                        { onChange = Just Msgs.UpdateData
-                        , text = model.data
-                        , placeholder = Just <| Input.placeholder [] <| text "Текст"
-                        , label = Input.labelLeft [] <| text "Editing"
-                        }
-                Completed -> 
-                    el [] <| text link.name
-    in
-        column 
-            [ spacing 5 ]
-            [ el [ Event.onClick <| Msgs.UpdateLink link Editing ] <| div
-            , el [] <| text link.cid
-            ]
-
-viewCell : Color -> Node -> Element Msg
-viewCell color node =
+viewCell : Node -> Color -> Element Msg
+viewCell node color =
     paragraph
         [ Background.color color
         , centerX
         , centerY
         , padding 10
-        , htmlAttribute Html.Attributes.style "overflow-wrap" "break-word"
+        , htmlAttribute <| Html.Attributes.style [ ( "overflow-wrap", "break-word" ) ]
         ] <|
-        text node.title
+        [ text <| node.title ]
 
 viewSector : Node -> Element Msg
-viewSector node ->
+viewSector node =
     let
+        children (Children x) =
+            x
+
         color i =
             case i of
                 0 -> white
@@ -131,6 +265,7 @@ viewSector node ->
                 4 -> cyan
                 5 -> blue
                 6 -> violet
+                _ -> white
 
         childMap child =
             case ( String.toInt child.name ) of
@@ -141,7 +276,7 @@ viewSector node ->
                             [ spacing 5
                             , padding 5
                             ] <|
-                            viewRow List.map (\x -> viewCell (color int) x) child.children
+                            List.map (\x -> viewCell x <| color int <| 1.0 ) <| children child.children
                         ]
                 Err _ ->
                     none
@@ -151,16 +286,16 @@ viewSector node ->
         , Border.color Color.darkGrey
         ] 
         [ el 
-            [ Font.size 
+            [ Font.size 12
             , centerX
             , centerY
             ] <|
             text node.title
-        , column [] List.map childMap node.children
+        , column [] <| List.map childMap (children node.children)
         ]
 
-viewTable : Node -> Element Msg
-viewTable node =
+viewTable : List Node -> Element Msg
+viewTable list =
     let
         childMap child =
             case ( String.toInt child.name ) of
@@ -169,20 +304,8 @@ viewTable node =
                 Err _ ->
                     none
     in
-    column [ spacing 15 ] <| List.map childMap node.children
+    column [ spacing 15 ] <| List.map childMap list
 
-viewCell : Link -> Element Msg
-viewCell link =
-    el
-        [ width fill
-        , pointer
-        , colorFill
-        , mouseOver [ Background.color <| Color.grayscale 0.2 ]
-        , padding 10
-        , Event.onClick <| Msgs.PreviewGet link
-        , Event.onDoubleClick <| Msgs.UpdateQuery link.name
-        ] <|
-        paragraph [] [ text link.name ] 
 
 -- navigation in breadcrumbs
 
@@ -195,12 +318,12 @@ viewPath node acc =
                 , mouseOver <| [ Background.color Color.lightGrey ]
                 ]
                 { label = text (node.title ++ " > ")
-                , onPress = Just <| Msgs.GetNode node.cid
+                , onPress = Just <| GetNode node.cid
                 }
     in
     case node.parent of
-        Just parent ->
-            viewPath parent ([ div ] :: acc)
+        Just (Parent x) ->
+            viewPath x (div :: acc)
         Nothing ->
             row [] acc
 
@@ -218,59 +341,34 @@ viewControls model =
         [ spacing 5, width fill ]
         [ Input.text
             [ padding 5
-            , Event.onLoseFocus <| Msgs.PathInit model.hash
+            , Event.onLoseFocus <| GetNode model.root
             ]
-            { onChange = Just Msgs.UpdateQuery
-            , text = model.hash
+            { onChange = Just UpdateQuery
+            , text = model.root
             , placeholder = Just <| Input.placeholder [] <| text "Enter query hash here"
             , label = Input.labelLeft [ padding 5 ] <| text "Root Hash"
             }
         , Input.button
             style
-            { onPress = Just <| Msgs.DagPut <| objectEncoder model.data model.node 
-            , label = text "dag-cbor put"
+            { onPress = Just <| ObjectPut <| objectEncoderPB model.data model.nodes
+            , label = text "obj put"
             }
         , Input.button
             style
-            { onPress = Just <| Msgs.DagGet "Home" model.hash 
-            , label = text "dag get"
+            { onPress = Just <| NoOp 
+            , label = text "empty"
             }
         , Input.button
             style
-            { onPress = Just <| Msgs.DagPutPB <| dagNodePbEncoder model.node 
-            , label = text "dag-pb put"
+            { onPress = Just <| NoOp 
+            , label = text "empty"
             }
         , Input.button
             style
-            { onPress = Just <| Msgs.LsObjects model.hash 
-            , label = text "ls"
+            { onPress = Just <| NoOp 
+            , label = text "empty"
             }
         ]
-
-editIcon : Link -> Element Msg
-editIcon link =
-    el
-        [ pointer
-        , padding 5
-        , Event.onClick <| Msgs.UpdateLink link Editing
-        ] 
-        <| html 
-        <| Svg.svg 
-            [ Html.Attributes.width 18
-            , Html.Attributes.height 18
-            ]
-            [ Icon.edit Color.black 18 ]
-
-findLinkByName : Name -> WebData Object -> Maybe Link
-findLinkByName link_name object =
-    case RemoteData.toMaybe object of
-        Just object ->
-            object.links
-                |> List.filter (\link -> link.name == link_name)
-                |> List.head
-
-        Nothing ->
-            Nothing
 
 viewData : Data -> Element Msg
 viewData data =
@@ -281,7 +379,7 @@ viewData data =
         ]
         [ Input.multiline
             [ padding 5 ]
-            { onChange = Just Msgs.UpdateData
+            { onChange = Just UpdateData
             , placeholder = Just <| Input.placeholder [] <| text "Data" 
             , label = Input.labelLeft [] <| text "Data" 
             , text = "text field"
@@ -289,25 +387,23 @@ viewData data =
             }
         ]
 
-maybeRemote : (a -> Element Msg) -> WebData a -> Element Msg
-maybeRemote viewFunction response =
-    case response of
-        RemoteData.NotAsked ->
-            text ""
+editIcon : Link -> Element Msg
+editIcon link =
+    el
+        [ pointer
+        , padding 5
+        , Event.onClick <| NoOp
+        ] 
+        <| html 
+        <| Svg.svg 
+            [ Html.Attributes.width 18
+            , Html.Attributes.height 18
+            ]
+            [ Icon.edit Color.black 18 ]
 
-        RemoteData.Loading ->
-            text "Loading..."
-
-        RemoteData.Success object ->
-            viewFunction object
-
-        RemoteData.Failure error ->
-            text (toString error)
-
-
-renderDropZone : DropZonModel -> Element Msg
+renderDropZone : DropZone.Model -> Element Msg
 renderDropZone dropZoneModel =
-    map Msgs.DnD (el (renderZoneAttributes dropZoneModel) <| 
+    map DnD (el (renderZoneAttributes dropZoneModel) <| 
         el
             [ Font.size 20
             , centerX
@@ -316,10 +412,205 @@ renderDropZone dropZoneModel =
             , Font.bold ]
             <| text "DRAG HERE" )
 
-renderZoneAttributes : DropZonModel -> 
-    List (Attribute (DropZonDropZoneMessage (List NativeFile)))
+
+-- REQUESTS 
+
+addText : String -> Cmd Msg
+addText text =
+    let
+        body =
+            Http.multipartBody
+            [ Http.stringPart "textpart" text
+            ]
+    in
+        Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
+            |> Http.send AddFile
+
+-- BUNCH OF REQUESTS FOR ADDING FILES
+-- [ add files, patch current node, patch path, patch root node ]
+
+addFileRequest : NativeFile -> Task.Task Http.Error Link
+addFileRequest nf =
+    let
+        body =
+            Http.multipartBody [ FileReader.filePart nf.name nf ]
+    in
+        Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
+            |> Http.toTask
+
+addFiles : List NativeFile -> Cmd Msg
+addFiles nf_list =
+    (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
+        |> Task.attempt DraftUpdate
+        
+addLinkRequest : Hash -> String -> Hash -> Task.Task Http.Error Hash
+addLinkRequest parent name cid =
+    Http.get ( ipfsApiUrl
+                    ++ "object/patch/add-link?arg=" ++ parent
+                    ++ "&arg=" ++ name
+                    ++ "&arg=" ++ cid )
+                (Decode.field "Hash" Decode.string)
+                |> Http.toTask
+
+patchObject : Node -> Hash -> Task.Task Http.Error Hash
+patchObject node new_cid =
+    case node.parent of
+        Just (Parent parent) ->
+            addLinkRequest parent.cid node.name new_cid
+                |> Task.andThen (\hash -> patchObject parent hash)
+        Nothing -> 
+            Task.succeed node.cid
+
+{-}
+patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
+patchPath acc path hash =
+    case path of
+        (childname, childhash) :: (parentname, parenthash) :: xs ->
+            addLinkRequest parenthash 
+                { name = childname, size = 0, cid = hash, obj_type = 2, status = Completed }
+                |> Task.andThen
+                    (\hash -> 
+                        patchPath (acc ++ [(parentname, hash)]) ((parentname, parenthash) :: xs) hash )
+        x :: [] -> 
+            Task.succeed acc
+        [] ->
+            Task.succeed acc
+-}
+
+
+-- IPFS OBJECT API REQUESTS
+
+getNode : Hash -> Cmd Msg
+getNode hash =
+    Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ hash ) objectDecoder 
+        |> RemoteData.sendRequest
+        |> Cmd.map UpdateNode
+
+removeLink : Hash -> Link -> Cmd Msg
+removeLink hash link =
+    Http.get ( ipfsApiUrl 
+        ++ "object/patch/rm-link?arg=" ++ hash 
+        ++ "&arg=" ++ link.name ) onlyHashDecoder
+        |> RemoteData.sendRequest
+        |> Cmd.map GetModifiedObject
+
+addLink : Hash -> String -> Hash -> Cmd Msg
+addLink node_hash name link_hash =
+    Http.get ( ipfsApiUrl
+        ++ "object/patch/add-link?arg=" ++ node_hash 
+        ++ "&arg=" ++ link_hash 
+        ++ "&arg=" ++ name ) onlyHashDecoder
+        |> RemoteData.sendRequest
+        |> Cmd.map GetModifiedObject
+
+
+-- DECODERS
+
+nativeFileDecoder : Decode.Decoder NativeFile
+nativeFileDecoder =
+    Decode.map4 NativeFile
+        (Decode.field "name" Decode.string)
+        (Decode.field "size" Decode.int)
+        mtypeDecoder
+        Decode.value
+
+mtypeDecoder : Decode.Decoder (Maybe MimeType.MimeType)
+mtypeDecoder =
+    Decode.map MimeType.parseMimeType (Decode.field "type" Decode.string)
+
+fileLinkDecoder : Decode.Decoder Link
+fileLinkDecoder =
+    decode Link
+        |> required "Name" Decode.string
+        |> required "Size" sizeDecoder
+        |> required "Hash" Decode.string
+
+sizeDecoder : Decode.Decoder Int
+sizeDecoder =
+    Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
+
+objectDecoder : Decode.Decoder Object
+objectDecoder =
+    decode Object
+        |> required "Data" Decode.string 
+        |> required "Links" linksDecoder
+
+linksDecoder : Decode.Decoder (List Link)
+linksDecoder =
+    Decode.field "Links" <| Decode.list pbLinkDecoder
+
+pbLinkDecoder : Decode.Decoder Link
+pbLinkDecoder =
+    decode Link
+        |> required "Name" Decode.string
+        |> required "Size" sizeDecoder
+        |> required "Hash" Decode.string
+
+onlyHashDecoder : Decode.Decoder Hash
+onlyHashDecoder =
+    Decode.field "Hash" Decode.string
+
+objectModifiedDecoder : Decode.Decoder ModifiedObject
+objectModifiedDecoder =
+    decode ModifiedObject
+        |> required "Hash" Decode.string
+        |> required "Links" linksDecoder
+
+
+-- ENCODERS
+
+objectEncoderPB : Data -> List Node -> Value
+objectEncoderPB data list =
+    Encode.object
+        [ ("Data", Encode.string data)
+        , ("Links", Encode.list <| List.map linkEncoderPB list)
+        ]
+
+dagNodePbEncoder : List Link -> List Value
+dagNodePbEncoder list =
+    List.map linkApiEncoderPB list
+
+linkEncoderPB : Node -> Value
+linkEncoderPB node =
+    Encode.object
+        [ ("name", Encode.string node.name)
+        , ("size", Encode.int node.size)
+        , ("multihash", Encode.string node.cid )
+        ]
+
+objectApiEncoder : Data -> List Node -> Value
+objectApiEncoder data list =
+    Encode.object
+        [ ("Data", Encode.string data)
+        , ("Links", Encode.list <| List.map linkEncoderPB list)
+        ]
+
+linkApiEncoderPB : Link -> Value
+linkApiEncoderPB link =
+    Encode.object
+        [ ("Name", Encode.string link.name)
+        , ("Size", Encode.int link.size)
+        , ("Hash", Encode.string link.cid)
+        ]
+
+-- HELPERS
+
+maybeRemote : (a -> Element Msg) -> WebData a -> Element Msg
+maybeRemote viewFunction response =
+    case response of
+        RemoteData.NotAsked ->
+            text ""
+        RemoteData.Loading ->
+            text "Loading..."
+        RemoteData.Success object ->
+            viewFunction object
+        RemoteData.Failure error ->
+            text (toString error)
+
+renderZoneAttributes : DropZone.Model -> 
+    List (Attribute (DropZone.DropZoneMessage (List NativeFile)))
 renderZoneAttributes dropZoneModel =
-    (if DropZonisHovering dropZoneModel then
+    (if DropZone.isHovering dropZoneModel then
         renderStyle Color.darkGrey
         -- style the dropzone differently depending on whether the user is hovering
     else
@@ -342,6 +633,10 @@ renderStyle color =
 
 alpha : Float
 alpha = 1.0
+
+white : Float -> Color
+white alpha =
+    Color.rgba 255 255 255 alpha
 
 orange : Float -> Color
 orange alpha = 
@@ -379,50 +674,149 @@ fontFamily =
     , Font.typeface "sans-serif"
     ]
 
+
 {-
 
-viewPath : List Node -> Element Msg
-viewPath path =
-    row [] <|
-        List.map
-            (\(name, hash) ->
-                Input.button 
-                    [ padding 5
-                    , mouseOver <| [ Background.color Color.lightGrey ]
-                    ]
-                    { label = text (name ++ " > ") 
-                    , onPress = Just <| Msgs.DagGet name hash
-                    }
-            )
-            path
-renderStyleInFront : Float -> List (Attribute a)
-renderStyleInFront transparency =
-    [ width fill
-    , height fill
-    , alpha transparency
-    , Background.color Color.black
-    ]
 
-onEnter : Msg -> Attribute Msg
-onEnter msg =
+        UpdateFiles response ->
+            case response of
+                Ok links ->
+                    ( { model | content = model.content ++ links }, 
+                        Task.attempt PatchObjectUpdate <| patchObject model.link.cid links )
+                Err error ->
+                    ( { model | data = Basics.toString <| error }, Cmd.none )
+
+
+        GetModifiedObject response ->
+            let
+                ipfs_hash = RemoteData.withDefault "" response
+            in
+                ( { model | hash = ipfs_hash }, dagGet ipfs_hash )
+
+
+findLinkByName : String -> WebData Object -> Maybe Link
+findLinkByName link_name object =
+    case RemoteData.toMaybe object of
+        Just object ->
+            object.links
+                |> List.filter (\link -> link.name == link_name)
+                |> List.head
+
+        Nothing ->
+            Nothing
+
+pathUpdate : Node -> List Node -> List Node -> List Node
+pathUpdate node acc path =
+    case path of
+        x :: xs -> 
+            case x == node of
+                True -> 
+                    acc ++ [x]
+                False -> 
+                    pathUpdate node (acc ++ [x]) xs 
+        [] -> acc ++ [node]
+
+pathStackUpdate : Node -> List Node -> List Node
+pathStackUpdate node path =
+    case path of
+        x :: xs -> 
+            case x == node of
+                True -> 
+                    path
+                False -> 
+                    pathStackUpdate node xs 
+        [] -> [node] ++ path
+
+pathToUrl : List Node -> String
+pathToUrl path = 
+    List.foldr (\( name, hash ) list -> (name ++ "/") ++ list) "" path
+
+fileCat : Hash -> Cmd Msg
+fileCat hash =
+    Http.getString ( ipfsApiUrl ++ "cat?arg=" ++ hash )
+        |> RemoteData.sendRequest
+        |> Cmd.map FileGet
+
+
+nodeProperties : Node -> Element Msg
+nodeProperties node =
     let
-        isEnter code =
-            if code == 13 then
-                Decodsucceed msg
-            else
-                Decodfail "not ENTER"
+        div =
+            case link.status of 
+                Editing ->
+                    Input.text
+                        [ padding 5
+                        , htmlAttribute <| Html.Attributes.id ("link-" ++ link.name)
+                        , Event.onLoseFocus <| AddText link Completed
+                        , Font.size 20
+                        ]
+                        { onChange = Just UpdateData
+                        , text = model.data
+                        , placeholder = Just <| Input.placeholder [] <| text "Текст"
+                        , label = Input.labelLeft [] <| text "Editing"
+                        }
+                Completed -> 
+                    el [] <| text link.name
     in
-        Event.on "keydown" (DecodandThen isEnter Event.keyCode)
+        column 
+            [ spacing 5 ]
+            [ el [ Event.onClick <| UpdateLink link Editing ] <| div
+            , el [] <| text link.cid
+            ]
 
-renderZoneAttributesInFront : DropZonModel -> 
-    List (Attribute (DropZonDropZoneMessage (List NativeFile)))
-renderZoneAttributesInFront dropZoneModel =
-    (if DropZonisHovering dropZoneModel then
-        renderStyleInFront 0.2
-        -- style the dropzone differently depending on whether the user is hovering
-    else
-        renderStyleInFront 0
-    )
-        ++ -- add the necessary DropZone event wiring
-           ( List.map htmlAttribute <| dropZoneEventHandlers FileReader.parseDroppedFiles )
+
+
+        PatchObjectUpdate response ->
+            let
+                draft_link = 
+                    (model.link.name, model.link.cid)
+            in
+            case response of
+                Ok hash ->
+                    ( model, Cmd.batch [ lsObjects hash,
+                        case List.head model.path == Just draft_link of
+                            True ->
+                                Task.attempt PathPatchUpdate 
+                                    <| patchPath [(model.link.name, hash)] model.path hash
+                            False ->
+                                Task.attempt PathPatchUpdate
+                                    <| patchPath [(model.link.name, hash)] ( [ draft_link ] ++ model.path ) hash
+                                     ] )
+                Err error ->
+                    ( { model | data = Basics.toString <| error }, Cmd.none )
+
+
+        UpdateNode response ->
+            let
+                object =
+                    RemoteData.withDefault "response fails" response
+                
+                newNode =
+                    Result.withDefault [ defaultLink ] <| Decode.decodeString objectDecoder object
+            in
+                ( { model | node = newNode, draft = newNode, raw_dag = response }, Cmd.none )
+
+        UpdateLink link status ->
+            let
+                updateNodeLinksList x =
+                    if x.name == link.name then
+                        { link | status = status }
+                    else
+                        x
+
+                updateLinkStatus =
+                    { link | status = status }
+
+                cmd =
+                    case status of 
+                        Editing ->
+                            Task.attempt (\_ -> NoOp) <| Dom.focus ("link-" ++ link.name)
+                        Completed ->
+                            Ports.sendData <| objectEncoderPB model.data model.node
+            in
+                { model | node = List.map updateNodeLinksList model.node, link = updateLinkStatus }
+                    ! [ cmd ]
+
+
+
 -}
