@@ -7,7 +7,7 @@ import Http
 import Json.Decode as Decode
 import Json.Decode.Pipeline exposing (decode, required, hardcoded, optional, requiredAt)
 import Json.Encode as Encode exposing (Value, object)
-import Task
+import Task exposing (Task)
 import Result
 import Html exposing (Html)
 import Html.Attributes
@@ -29,7 +29,9 @@ import Svg exposing (svg)
 import DropZone exposing (dropZoneEventHandlers, isHovering)
 import FileReader exposing (Error(..), FileRef, NativeFile, readAsTextFile, filePart)
 import Json.Decode.Extra as DecodeExtra exposing (parseInt)
-import MimeType exposing (MimeType, MimeText)
+import MimeType as Mime exposing (MimeType, MimeText)
+import Tree exposing (Tree)
+import Tree.Zipper as Zipper exposing (Zipper)
 
 -- CONSTANTS
 
@@ -46,23 +48,23 @@ defaultNode =
     { name = "ROOT"
     , cid = "QmaaWo8DMGGkdVvMFz7Ld4DzdeyhRHNGy2aBpM7TcCKWLu"
     , size = 0
-    , children = Children []
-    , parent = Nothing
-    , content = []
     , title = "THERE IS NO NODE"
+--    , children = Children []
+--    , parent = Nothing
+--    , content = []
     }
-
 
 type alias Model =
     { root : Hash -- query hash (root)
     , data : Data -- some data to send
-    , nodes : List Node
-    , content : List File -- file list
-    , path : List Node -- dag nodes path
-    , raw_dag : WebData String -- daw dag for response debugging
+    , dag : Zipper Node
+    , raw_dag : String -- daw dag for response debugging
     , dropZone :
         DropZone.Model
     , files_to_add : List NativeFile
+    , content : List File -- file list
+    , tree : Tree Node
+--    , path : List Node -- dag nodes path
     }
 
 type Status
@@ -74,10 +76,10 @@ type alias Node =
         { name : String
         , cid : String
         , size : Int
-        , children : Children
-        , parent : Maybe Parent
-        , content : List File
         , title : String
+--        , children : Children
+--        , parent : Maybe Parent
+--        , content : List File
         }
 
 type Children = Children (List Node)
@@ -94,8 +96,8 @@ type alias File =
 -- OBJECT API TYPES FOR HANDLING IPFS RESPONSES
 
 type alias Object =
-    { data : String
-    , links : List Link
+    { links : List Node
+    , data : String
     }
 
 type alias ModifiedObject =
@@ -105,15 +107,12 @@ type alias ModifiedObject =
 
 type alias Link =
     { name : String
-    , size : Int
     , cid : String
+    , size : Int
     }
 
-type alias Hash = 
-    String
-
-type alias Data =
-    String
+type alias Hash = String
+type alias Data = String
 
 type Msg 
     = NoOp
@@ -121,13 +120,15 @@ type Msg
     | UpdateData String
     | GetNode Hash
     | ObjectPut Value
-    | UpdateNode (WebData Object)
+    | UpdateNode (Result Http.Error Object)
+    | UpdateZipper (Result Http.Error (Tree Node))
+    | UpdateRawDag (Result Http.Error String)
     | AddFile (Result Http.Error Link)
     | AddText String
-    | GetModifiedObject (WebData Hash)
-    | DraftUpdate (Result Http.Error (List Link))
-    | PatchObjectUpdate (Result Http.Error Hash)
-    | FileCat Hash
+--    | GetModifiedObject (WebData Hash)
+--    | DraftUpdate (Result Http.Error (List Link))
+--    | PatchObjectUpdate (Result Http.Error Hash)
+--    | FileCat Hash
     | DnD (DropZone.DropZoneMessage (List NativeFile))
 
 
@@ -135,7 +136,12 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     let
         defaultFile =
-            { name = "defaultLink", size = 0, cid = "", obj_type = 2, status = Completed }
+            { name = "defaultLink"
+            , size = 0
+            , cid = ""
+            , mimetype = Mime.Text Mime.PlainText
+            , status = Completed 
+            }
     in
     case msg of
         NoOp ->
@@ -146,10 +152,22 @@ update msg model =
 
         UpdateData text ->
             { model | data = text } ! []
+
+        UpdateRawDag response ->
+            case response of 
+                Ok x ->
+                    ({model | raw_dag = x}, Cmd.none)      
+
+                Err _ ->
+                    ( model, Cmd.none )
                      
         -- api/v0/object/get?arg=hash
         GetNode hash ->
-            ( model, getNode hash )
+            ( model, Task.attempt 
+                UpdateZipper
+                <| getTree 2
+                <| Tree.tree { name = "HOME", size = 0, cid = hash, title = ""} []
+            )
 
         AddText text ->
             ( model, addText text )
@@ -157,24 +175,38 @@ update msg model =
         ObjectPut value ->
             ( model, Ports.sendData value )
 
+        UpdateZipper result ->
+            case result of
+                Ok x -> 
+                    ({ model | tree = x }, Cmd.none)
+                Err _ ->
+                    ({ model | raw_dag = "UPDATE ZIPPER TASK FAIL" }, Cmd.none)
+
+        UpdateNode response ->
+            case response of
+                Ok x ->
+                    ( { model | raw_dag = x.data }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
         AddFile response ->
             case response of
                 Ok link ->
                     let
-                        file = File link.name link.cid link.size (MimeType.Text MimeType.PlainText) Completed
+                        file = File link.name link.cid link.size (Mime.Text Mime.PlainText) Completed
                     in    
                         ( { model | content = ( file :: model.content ) }, Cmd.none )
                 Err _ ->
                     ( model, Cmd.none )
 
         DnD (DropZone.Drop files) ->
-            ( { model
-                | dropZone =
+            ( { model | dropZone =
                     DropZone.update (DropZone.Drop files) model.dropZone
                 , files_to_add = 
                     files
-            }
-            , addFiles files
+            }, Cmd.none
+--            , addFiles files
             )
 
         DnD a ->
@@ -194,20 +226,18 @@ view model =
             [ Font.size 12
             , spacing 10
             , padding 10
+            , width fill
             ]
             [ viewControls model
-            , viewPath (Maybe.withDefault defaultNode <| List.head model.nodes) []
-            , row
-                [ width fill ]
-                [ column
-                    [ width ( fill |> maximum 170 ) ] 
-                    [ viewTable model.nodes ]
-                , column
-                    [ spacing 10 ]
-                    [ column [] <| List.map viewFile model.content -- Show Files
-                    , renderDropZone model.dropZone
-                    , maybeRemote viewRawDag model.raw_dag
-                    ]
+            , row [ spacing 5 ] []
+            , column
+                [] 
+                [ viewTable model.tree ]
+            , column
+                [ spacing 10 ]
+                [ column [] <| List.map viewFile model.content -- Show Files
+                , renderDropZone model.dropZone
+                , viewTree model.tree
                 ]
             ]
 
@@ -220,13 +250,14 @@ viewFile file =
             }
     in
     column [] <| 
-        [ image [ width (px 130) ]
+        [ image []
             { src = link_src.url
             , description = "it's not an image" 
             }
         , el
             [ padding 2
-            , Event.onClick <| FileCat file.cid
+            , Event.onClick <| NoOp
+                -- FileCat file.cid
             ]
           <| text "cat_file"
         ]
@@ -239,45 +270,34 @@ viewRawDag raw_dag =
         ] <| 
         paragraph [ padding 5 ] [ text raw_dag ]
 
-viewCell : Node -> Color -> Element Msg
+viewCell : Tree Node -> Color -> Element Msg
 viewCell node color =
-    paragraph
+    el
         [ Background.color color
-        , centerX
-        , centerY
         , padding 10
         , htmlAttribute <| Html.Attributes.style [ ( "overflow-wrap", "break-word" ) ]
-        ] <|
-        [ text <| node.title ]
+        , pointer
+        , Font.size 13
+        , Font.bold
+        , width fill
+        ] <| el [ centerX, centerY ] <| text <| .name <| Tree.label node
 
-viewSector : Node -> Element Msg
-viewSector node =
+viewSector : Tree Node -> Color -> Element Msg
+viewSector tree color =
     let
-        children (Children x) =
-            x
-
-        color i =
-            case i of
-                0 -> white
-                1 -> orange
-                2 -> yellow
-                3 -> green
-                4 -> cyan
-                5 -> blue
-                6 -> violet
-                _ -> white
-
         childMap child =
-            case ( String.toInt child.name ) of
+            case ( String.toInt <| .name <| Tree.label child ) of
                 Ok int ->
-                    row [ Background.color Color.white ]
-                        [ el [] <| text node.title
-                        , row
-                            [ spacing 5
-                            , padding 5
-                            ] <|
-                            List.map (\x -> viewCell x <| color int <| 1.0 ) <| children child.children
-                        ]
+                    row
+                        [ spacing 5
+                        , padding 5
+                        , width fill
+                        ] <| [ el [ padding 10, centerX, centerY, width fill ] <| text <| .name <| Tree.label child ] ++
+                            (List.map
+                                (\x -> 
+                                    viewCell x <| ( if int == 0 then white 1.0 else color )
+                                ) <| Tree.children child
+                            )
                 Err _ ->
                     none
     in
@@ -289,43 +309,70 @@ viewSector node =
             [ Font.size 12
             , centerX
             , centerY
+            , width fill
             ] <|
-            text node.title
-        , column [] <| List.map childMap (children node.children)
+            text <| .title <| Tree.label tree
+        , column [] <| List.map childMap <| Tree.children tree
         ]
 
-viewTable : List Node -> Element Msg
-viewTable list =
+viewTable : Tree Node -> Element Msg
+viewTable tree =
     let
+        alpha =
+            1.0
+
+        color i =
+            case i of
+                0 -> yellow
+                1 -> orange
+                2 -> violet
+                3 -> cyan
+                4 -> blue
+                5 -> green
+                _ -> white
+
         childMap child =
-            case ( String.toInt child.name ) of
+            case ( String.toInt <| .name <| Tree.label child ) of
                 Ok int ->
-                    viewSector child
+                    viewSector child <| color int <| alpha
                 Err _ ->
                     none
     in
-    column [ spacing 15 ] <| List.map childMap list
+    column [ spacing 5 ] <| List.map childMap <| Tree.children tree
+
+viewTree : Tree Node -> Element Msg
+viewTree tree =
+    let
+        style =
+            [ padding 5
+            , Border.width 1
+            , Border.color Color.darkGrey
+            , mouseOver <| [ Background.color Color.lightGrey ]
+            ]
+    in
+    column [] <|
+        [ el style <| text <| .name <| Tree.label tree ] ++
+        (List.map 
+                (\x ->
+                    case (Tree.children x) of
+                        [] -> el style <| text <| .name <| Tree.label x
+                        _ -> viewTree x
+                ) <| Tree.children tree
+            )
+
 
 
 -- navigation in breadcrumbs
 
-viewPath : Node -> List (Element Msg) -> Element Msg
-viewPath node acc =
-    let
-        div =
-            Input.button 
-                [ padding 5
-                , mouseOver <| [ Background.color Color.lightGrey ]
-                ]
-                { label = text (node.title ++ " > ")
-                , onPress = Just <| GetNode node.cid
-                }
-    in
-    case node.parent of
-        Just (Parent x) ->
-            viewPath x (div :: acc)
-        Nothing ->
-            row [] acc
+viewNodeinPath : Node -> Element Msg
+viewNodeinPath node =
+    Input.button 
+        [ padding 5
+        , mouseOver <| [ Background.color Color.lightGrey ]
+        ]
+        { label = text (node.name ++ " > ")
+        , onPress = Just <| GetNode node.cid
+        }
 
 viewControls : Model -> Element Msg
 viewControls model =
@@ -350,7 +397,8 @@ viewControls model =
             }
         , Input.button
             style
-            { onPress = Just <| ObjectPut <| objectEncoderPB model.data model.nodes
+            { onPress = Just NoOp
+                -- Just <| ObjectPut <| objectEncoderPB model.data <| Zipper.children model.dag
             , label = text "obj put"
             }
         , Input.button
@@ -412,7 +460,6 @@ renderDropZone dropZoneModel =
             , Font.bold ]
             <| text "DRAG HERE" )
 
-
 -- REQUESTS 
 
 addText : String -> Cmd Msg
@@ -429,6 +476,7 @@ addText text =
 -- BUNCH OF REQUESTS FOR ADDING FILES
 -- [ add files, patch current node, patch path, patch root node ]
 
+{-}
 addFileRequest : NativeFile -> Task.Task Http.Error Link
 addFileRequest nf =
     let
@@ -461,7 +509,8 @@ patchObject node new_cid =
         Nothing -> 
             Task.succeed node.cid
 
-{-}
+
+
 patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
 patchPath acc path hash =
     case path of
@@ -480,20 +529,71 @@ patchPath acc path hash =
 
 -- IPFS OBJECT API REQUESTS
 
-getNode : Hash -> Cmd Msg
-getNode hash =
-    Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ hash ) objectDecoder 
-        |> RemoteData.sendRequest
-        |> Cmd.map UpdateNode
+getNode : Node -> Cmd Msg
+getNode node =
+    Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid ) objectDecoder
+        |> Http.send UpdateNode
 
-removeLink : Hash -> Link -> Cmd Msg
-removeLink hash link =
+getNodeTask : Node -> Task Http.Error (Tree Node)
+getNodeTask node =
+    let
+        updateTitle =
+            (\x data -> Tree.tree { x | title = data } [])
+    in
+    Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid ) objectDecoder
+        |> Http.toTask
+        |> Task.andThen
+            (\object ->  
+                object.links
+                    |> List.map
+                        (\link -> 
+                            getData (Debug.log "get data from" link)
+                            |> Task.map2 updateTitle (Task.succeed link)
+                        )
+                    |> Task.sequence
+                    |> Task.andThen
+                        (\links_list ->
+                            Task.succeed <| Tree.tree { node | title = object.data } links_list  
+                        )
+            )
+
+getTree : Int -> Tree Node -> Task Http.Error (Tree Node)
+getTree depth tree =
+    case ((Debug.log "depth level" depth) == 0) of
+        True ->
+            Task.succeed tree
+        False ->
+            Tree.label tree
+            |> getNodeTask
+            |> Task.andThen
+                (\x -> 
+                    Tree.children x
+                    |> List.map 
+                        (\child ->
+                            getNodeTask (Tree.label child)
+                            |> Task.andThen (getTree (depth - 1))
+                        )
+                    |> Task.sequence
+                )
+            |> Task.andThen (\list -> Task.succeed <| Tree.replaceChildren list tree )
+
+getData : Node -> Task Http.Error Data
+getData node =
+    Http.getString ( ipfsApiUrl ++ "object/data?arg=" ++ node.cid )
+        |> Http.toTask
+
+dataDecoder : Decode.Decoder String
+dataDecoder =
+    Decode.field "Data" Decode.string
+
+{-}
+removeLink : Node -> Cmd Msg
+removeLink node =
     Http.get ( ipfsApiUrl 
-        ++ "object/patch/rm-link?arg=" ++ hash 
+        ++ "object/patch/rm-link?arg=" ++ (case node.parent of Just parent -> parent.cid Nothing) 
         ++ "&arg=" ++ link.name ) onlyHashDecoder
         |> RemoteData.sendRequest
         |> Cmd.map GetModifiedObject
-
 addLink : Hash -> String -> Hash -> Cmd Msg
 addLink node_hash name link_hash =
     Http.get ( ipfsApiUrl
@@ -502,7 +602,7 @@ addLink node_hash name link_hash =
         ++ "&arg=" ++ name ) onlyHashDecoder
         |> RemoteData.sendRequest
         |> Cmd.map GetModifiedObject
-
+-}
 
 -- DECODERS
 
@@ -514,37 +614,41 @@ nativeFileDecoder =
         mtypeDecoder
         Decode.value
 
-mtypeDecoder : Decode.Decoder (Maybe MimeType.MimeType)
+mtypeDecoder : Decode.Decoder (Maybe MimeType)
 mtypeDecoder =
-    Decode.map MimeType.parseMimeType (Decode.field "type" Decode.string)
+    Decode.map Mime.parseMimeType (Decode.field "type" Decode.string)
 
 fileLinkDecoder : Decode.Decoder Link
 fileLinkDecoder =
     decode Link
         |> required "Name" Decode.string
-        |> required "Size" sizeDecoder
         |> required "Hash" Decode.string
+        |> required "Size" sizeDecoder
 
-sizeDecoder : Decode.Decoder Int
-sizeDecoder =
-    Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
+nodeDecoder : Decode.Decoder Node
+nodeDecoder =    
+    decode Node
+        |> required "Name" Decode.string
+        |> required "Hash" Decode.string
+        |> required "Size" Decode.int
+        |> optional "Title" Decode.string ""
 
 objectDecoder : Decode.Decoder Object
 objectDecoder =
     decode Object
+        |> required "Links" (Decode.list nodeDecoder)
         |> required "Data" Decode.string 
-        |> required "Links" linksDecoder
-
-linksDecoder : Decode.Decoder (List Link)
-linksDecoder =
-    Decode.field "Links" <| Decode.list pbLinkDecoder
 
 pbLinkDecoder : Decode.Decoder Link
 pbLinkDecoder =
     decode Link
         |> required "Name" Decode.string
-        |> required "Size" sizeDecoder
         |> required "Hash" Decode.string
+        |> required "Size" Decode.int
+
+sizeDecoder : Decode.Decoder Int
+sizeDecoder =
+    Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
 
 onlyHashDecoder : Decode.Decoder Hash
 onlyHashDecoder =
@@ -554,7 +658,7 @@ objectModifiedDecoder : Decode.Decoder ModifiedObject
 objectModifiedDecoder =
     decode ModifiedObject
         |> required "Hash" Decode.string
-        |> required "Links" linksDecoder
+        |> required "Links" (Decode.list pbLinkDecoder)
 
 
 -- ENCODERS
@@ -630,9 +734,6 @@ renderStyle color =
 
 
 -- COLOR PROPERTIES
-
-alpha : Float
-alpha = 1.0
 
 white : Float -> Color
 white alpha =
