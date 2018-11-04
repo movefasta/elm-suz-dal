@@ -43,17 +43,6 @@ ipfsGatewayUrl : String
 ipfsGatewayUrl = 
     "http://localhost:8080/ipfs/"
 
-defaultNode : Node
-defaultNode =
-    { name = "ROOT"
-    , cid = "QmaaWo8DMGGkdVvMFz7Ld4DzdeyhRHNGy2aBpM7TcCKWLu"
-    , size = 0
-    , title = "THERE IS NO NODE"
---    , children = Children []
---    , parent = Nothing
---    , content = []
-    }
-
 type alias Model =
     { root : Hash -- query hash (root)
     , data : Data -- some data to send
@@ -64,7 +53,7 @@ type alias Model =
     , files_to_add : List NativeFile
     , content : List File -- file list
     , tree : Tree Node
---    , path : List Node -- dag nodes path
+    , path : List Node -- dag nodes path
     }
 
 type Status
@@ -73,14 +62,16 @@ type Status
     | Selected
 
 type alias Node =
-        { name : String
-        , cid : String
-        , size : Int
-        , title : String
+    { name : String
+    , cid : String
+    , size : Int
+    , title : String
+    , parent : Maybe Parent
+    , status : Status
 --        , children : Children
---        , parent : Maybe Parent
 --        , content : List File
-        }
+    , id : Int
+    }
 
 type Children = Children (List Node)
 type Parent = Parent Node
@@ -93,11 +84,20 @@ type alias File =
     , status : Status
     }
 
--- OBJECT API TYPES FOR HANDLING IPFS RESPONSES
+-- OBJECT API TYPES FOR DECODE IPFS RESPONSES
 
 type alias Object =
     { links : List Node
     , data : String
+    }
+
+type alias ObjectStat =
+    { hash : String
+    , numLinks : Int
+    , blockSize : Int
+    , linksSize : Int
+    , dataSize : Int
+    , cumulativeSize : Int
     }
 
 type alias ModifiedObject =
@@ -125,11 +125,14 @@ type Msg
     | UpdateRawDag (Result Http.Error String)
     | AddFile (Result Http.Error Link)
     | AddText String
+    | DnD (DropZone.DropZoneMessage (List NativeFile))
+    | GetPath Node
+    | Select Node
+    | Touched Node
 --    | GetModifiedObject (WebData Hash)
 --    | DraftUpdate (Result Http.Error (List Link))
 --    | PatchObjectUpdate (Result Http.Error Hash)
 --    | FileCat Hash
-    | DnD (DropZone.DropZoneMessage (List NativeFile))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -153,6 +156,24 @@ update msg model =
         UpdateData text ->
             { model | data = text } ! []
 
+        GetPath node ->
+            ( { model | path = getPath node [ node ] }, Cmd.none )
+
+        Select node ->
+            ( { model | tree = 
+                Tree.map 
+                    (\x ->
+                        if x == node then
+                            { x | status = Selected }
+                        else
+                            { x | status = Completed }
+                    ) model.tree }
+                , Cmd.none )            
+
+        Touched node ->
+            ( { model | tree = Tree.indexedMap (toggleIfTarget node.id) model.tree
+                , data = node.title }, Cmd.none )
+
         UpdateRawDag response ->
             case response of 
                 Ok x ->
@@ -161,12 +182,11 @@ update msg model =
                 Err _ ->
                     ( model, Cmd.none )
                      
-        -- api/v0/object/get?arg=hash
         GetNode hash ->
-            ( model, Task.attempt 
+            ( model, Task.attempt
                 UpdateZipper
                 <| getTree 2
-                <| Tree.tree { name = "HOME", size = 0, cid = hash, title = ""} []
+                <| Tree.tree { name = "HOME", size = 0, cid = hash, title = "", parent = Nothing, status = Completed, id = 0 } []
             )
 
         AddText text ->
@@ -174,6 +194,7 @@ update msg model =
 
         ObjectPut value ->
             ( model, Ports.sendData value )
+
 
         UpdateZipper result ->
             case result of
@@ -229,17 +250,29 @@ view model =
             , width fill
             ]
             [ viewControls model
-            , row [ spacing 5 ] []
-            , column
-                [] 
-                [ viewTable model.tree ]
-            , column
-                [ spacing 10 ]
-                [ column [] <| List.map viewFile model.content -- Show Files
-                , renderDropZone model.dropZone
-                , viewTree model.tree
-                ]
+            , viewPath model.path
+            , viewURL model.path
+            , viewTable <| Tree.indexedMap (\idx val -> { val | id = idx }) model.tree
             ]
+
+viewDataInput : Node -> Element Msg
+viewDataInput node =
+    Input.text
+        [ padding 5
+        , Event.onLoseFocus <| ObjectPut <| objectEncoderPB node.title []
+        ]
+        { onChange = Just UpdateData
+        , text = node.title
+        , placeholder = Just <| Input.placeholder [] <| text "Введите данные сюда"
+        , label = Input.labelLeft [ padding 5 ] <| text "Данные"
+        }
+
+toggleIfTarget : Int -> Int -> Node -> Node
+toggleIfTarget id index node =
+    if id == index then
+        { node | status = Selected }
+    else
+        { node | status = Completed }
 
 viewFile : File -> Element Msg
 viewFile file =
@@ -271,16 +304,31 @@ viewRawDag raw_dag =
         paragraph [ padding 5 ] [ text raw_dag ]
 
 viewCell : Tree Node -> Color -> Element Msg
-viewCell node color =
+viewCell tree color =
+    let
+       node = Tree.label tree
+            
+    in
     el
-        [ Background.color color
+        [ if (node.status == Selected)
+            then (Background.color Color.lightGrey) 
+            else (Background.color color)
+        , Border.width 1
+        , Border.color Color.darkGrey
         , padding 10
         , htmlAttribute <| Html.Attributes.style [ ( "overflow-wrap", "break-word" ) ]
-        , pointer
         , Font.size 13
         , Font.bold
         , width fill
-        ] <| el [ centerX, centerY ] <| text <| .name <| Tree.label node
+        , Event.onClick <| GetPath node
+        , Event.onDoubleClick <| Touched node
+        ] <|
+        column
+        [ centerY
+        ]
+        [ el [ centerX ] <| text <| .name node
+        , el [ centerX ] <| text <| toString node.id
+        ]
 
 viewSector : Tree Node -> Color -> Element Msg
 viewSector tree color =
@@ -292,7 +340,8 @@ viewSector tree color =
                         [ spacing 5
                         , padding 5
                         , width fill
-                        ] <| [ el [ padding 10, centerX, centerY, width fill ] <| text <| .name <| Tree.label child ] ++
+                        ] <|
+                        [ viewCell child Color.white ] ++
                             (List.map
                                 (\x -> 
                                     viewCell x <| ( if int == 0 then white 1.0 else color )
@@ -302,16 +351,9 @@ viewSector tree color =
                     none
     in
     column 
-        [ Border.width 1
-        , Border.color Color.darkGrey
-        ] 
-        [ el 
-            [ Font.size 12
-            , centerX
-            , centerY
-            , width fill
-            ] <|
-            text <| .title <| Tree.label tree
+        [ spacing 5
+        ]
+        [ viewCell tree Color.white
         , column [] <| List.map childMap <| Tree.children tree
         ]
 
@@ -350,12 +392,12 @@ viewTree tree =
             , mouseOver <| [ Background.color Color.lightGrey ]
             ]
     in
-    column [] <|
-        [ el style <| text <| .name <| Tree.label tree ] ++
+    column style <|
+        [ viewCell tree Color.white ] ++
         (List.map 
                 (\x ->
                     case (Tree.children x) of
-                        [] -> el style <| text <| .name <| Tree.label x
+                        [] -> el [] <| text <| .name <| Tree.label x
                         _ -> viewTree x
                 ) <| Tree.children tree
             )
@@ -364,15 +406,35 @@ viewTree tree =
 
 -- navigation in breadcrumbs
 
+viewPath : List Node -> Element Msg
+viewPath list =
+    row [] <| List.map viewNodeinPath list
+
+viewURL : List Node -> Element Msg
+viewURL list =
+    case list of
+        x :: xs ->
+            row [] <| [ text <| .cid x ] ++ (List.map (\node ->  text <| "/" ++ .name node) xs)
+        [] ->
+            el [] <| text "NO PATH"
+ 
 viewNodeinPath : Node -> Element Msg
 viewNodeinPath node =
     Input.button 
         [ padding 5
         , mouseOver <| [ Background.color Color.lightGrey ]
         ]
-        { label = text (node.name ++ " > ")
+        { label = text (node.name ++ "/")
         , onPress = Just <| GetNode node.cid
         }
+
+getPath : Node -> List Node -> List Node
+getPath node acc =
+    case node.parent of
+        Just ( Parent parent ) ->
+            getPath parent (parent :: acc)
+        Nothing ->
+            acc
 
 viewControls : Model -> Element Msg
 viewControls model =
@@ -472,11 +534,34 @@ addText text =
     in
         Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
             |> Http.send AddFile
+{-}
+addData : Data -> Task.Task Http.Error
+addData data =
+-}
+
+addLink : Hash -> String -> Hash -> Task.Task Http.Error Hash
+addLink parent name cid =
+    Http.get ( ipfsApiUrl
+                    ++ "object/patch/add-link?arg=" ++ parent
+                    ++ "&arg=" ++ name
+                    ++ "&arg=" ++ cid )
+                (Decode.field "Hash" Decode.string)
+                |> Http.toTask
+
+patchObject : Node -> Hash -> Task.Task Http.Error Hash
+patchObject node new_cid =
+    case node.parent of
+        Just (Parent parent) ->
+            addLink parent.cid node.name new_cid
+                |> Task.andThen (\hash -> patchObject parent hash)
+        Nothing -> 
+            Task.succeed node.cid
+
 
 -- BUNCH OF REQUESTS FOR ADDING FILES
 -- [ add files, patch current node, patch path, patch root node ]
-
 {-}
+
 addFileRequest : NativeFile -> Task.Task Http.Error Link
 addFileRequest nf =
     let
@@ -490,24 +575,6 @@ addFiles : List NativeFile -> Cmd Msg
 addFiles nf_list =
     (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
         |> Task.attempt DraftUpdate
-        
-addLinkRequest : Hash -> String -> Hash -> Task.Task Http.Error Hash
-addLinkRequest parent name cid =
-    Http.get ( ipfsApiUrl
-                    ++ "object/patch/add-link?arg=" ++ parent
-                    ++ "&arg=" ++ name
-                    ++ "&arg=" ++ cid )
-                (Decode.field "Hash" Decode.string)
-                |> Http.toTask
-
-patchObject : Node -> Hash -> Task.Task Http.Error Hash
-patchObject node new_cid =
-    case node.parent of
-        Just (Parent parent) ->
-            addLinkRequest parent.cid node.name new_cid
-                |> Task.andThen (\hash -> patchObject parent hash)
-        Nothing -> 
-            Task.succeed node.cid
 
 
 
@@ -515,7 +582,7 @@ patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
 patchPath acc path hash =
     case path of
         (childname, childhash) :: (parentname, parenthash) :: xs ->
-            addLinkRequest parenthash 
+            addLink parenthash 
                 { name = childname, size = 0, cid = hash, obj_type = 2, status = Completed }
                 |> Task.andThen
                     (\hash -> 
@@ -527,21 +594,34 @@ patchPath acc path hash =
 -}
 
 
--- IPFS OBJECT API REQUESTS
+-- IPFS OBJECT API REQUESTS TURNED INTO TASKS FOR CHAINING
+
+getStats : Node -> Task Http.Error Node
+getStats node =
+    Http.get ( ipfsApiUrl ++ "object/stat?arg=" ++ node.cid ) objectStatDecoder
+        |> Http.toTask
+        |> Task.andThen (\stat -> Task.succeed { node | size = stat.cumulativeSize, cid = stat.hash })
 
 getNode : Node -> Cmd Msg
 getNode node =
-    Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid ) objectDecoder
+    objectDecoder ( Parent node )
+        |> Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid )
         |> Http.send UpdateNode
 
-getNodeTask : Node -> Task Http.Error (Tree Node)
-getNodeTask node =
+
+getChildren : Node -> Task Http.Error (Tree Node)
+getChildren node =
     let
         updateTitle =
-            (\x data -> Tree.tree { x | title = data } [])
+            (\x data -> Tree.tree { x | title = data, parent = Just (Parent node) } [])
+
+        objectGetRequest node =
+            objectDecoder ( Parent node )
+                |> Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid )
+                |> Http.toTask
     in
-    Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid ) objectDecoder
-        |> Http.toTask
+    getStats node 
+        |> Task.andThen objectGetRequest
         |> Task.andThen
             (\object ->  
                 object.links
@@ -559,18 +639,18 @@ getNodeTask node =
 
 getTree : Int -> Tree Node -> Task Http.Error (Tree Node)
 getTree depth tree =
-    case ((Debug.log "depth level" depth) == 0) of
+    case (depth == 0) of
         True ->
             Task.succeed tree
         False ->
             Tree.label tree
-            |> getNodeTask
+            |> getChildren
             |> Task.andThen
                 (\x -> 
                     Tree.children x
                     |> List.map 
                         (\child ->
-                            getNodeTask (Tree.label child)
+                            getChildren (Tree.label child)
                             |> Task.andThen (getTree (depth - 1))
                         )
                     |> Task.sequence
@@ -625,18 +705,21 @@ fileLinkDecoder =
         |> required "Hash" Decode.string
         |> required "Size" sizeDecoder
 
-nodeDecoder : Decode.Decoder Node
-nodeDecoder =    
+nodeDecoder : Parent -> Decode.Decoder Node
+nodeDecoder node =    
     decode Node
         |> required "Name" Decode.string
         |> required "Hash" Decode.string
         |> required "Size" Decode.int
         |> optional "Title" Decode.string ""
+        |> hardcoded (Just node)
+        |> hardcoded Completed
+        |> hardcoded 0
 
-objectDecoder : Decode.Decoder Object
-objectDecoder =
+objectDecoder : Parent -> Decode.Decoder Object
+objectDecoder parent =
     decode Object
-        |> required "Links" (Decode.list nodeDecoder)
+        |> required "Links" (Decode.list <| nodeDecoder parent)
         |> required "Data" Decode.string 
 
 pbLinkDecoder : Decode.Decoder Link
@@ -649,6 +732,17 @@ pbLinkDecoder =
 sizeDecoder : Decode.Decoder Int
 sizeDecoder =
     Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
+
+objectStatDecoder : Decode.Decoder ObjectStat
+objectStatDecoder =
+    decode ObjectStat
+        |> required "Hash" Decode.string
+        |> required "NumLinks" Decode.int
+        |> required "BlockSize" Decode.int
+        |> required "LinksSize" Decode.int
+        |> required "DataSize" Decode.int
+        |> required "CumulativeSize" Decode.int
+
 
 onlyHashDecoder : Decode.Decoder Hash
 onlyHashDecoder =

@@ -19,10 +19,15 @@ init =
 
 initNode : Node
 initNode =
-    { name = "HOME"
-    , cid = "QmPZqBbCpVNQhrCoEWPGEx3ZxAQDCxmiSN216nGs1RHGHN"
+    { name = "ROOT"
+    , cid = "QmQ12hfokJyGXFFMiFaL4TK5eNMPTq2aSy6ng5s9V6rLvb"
     , size = 0
-    , title = ""
+    , title = "THERE IS NO NODE"
+    , parent = Nothing
+    , status = Completed
+--    , children = Children []
+--    , content = []
+    , id = 0
     }
 
 initTree : Tree Node
@@ -49,7 +54,7 @@ initModel =
     , content = []
     , tree = initTree
 --    , links = []
---    , path = [("Home", initHash)]
+    , path = [ initNode ]
 --    , draft = []
     }
 
