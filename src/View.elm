@@ -46,13 +46,13 @@ ipfsGatewayUrl =
 type alias Model =
     { root : Hash -- query hash (root)
     , data : Data -- some data to send
-    , dag : Zipper Node
+    , zipper : Zipper Node
     , raw_dag : String -- daw dag for response debugging
     , dropZone :
         DropZone.Model
     , files_to_add : List NativeFile
     , content : List File -- file list
-    , tree : Tree Node
+--    , tree : Tree Node
     , path : List Node -- dag nodes path
     }
 
@@ -127,8 +127,6 @@ type Msg
     | AddText String
     | DnD (DropZone.DropZoneMessage (List NativeFile))
     | GetPath Node
-    | Select Node
-    | Touched Node
 --    | GetModifiedObject (WebData Hash)
 --    | DraftUpdate (Result Http.Error (List Link))
 --    | PatchObjectUpdate (Result Http.Error Hash)
@@ -157,21 +155,29 @@ update msg model =
             { model | data = text } ! []
 
         GetPath node ->
-            ( { model | path = getPath node [ node ] }, Cmd.none )
+            let
+                focusedLabel = Zipper.label model.zipper
+                
+                unSelectCurrentLabel =
+                    Zipper.replaceLabel { focusedLabel | status = Completed } model.zipper
 
-        Select node ->
-            ( { model | tree = 
-                Tree.map 
-                    (\x ->
-                        if x == node then
-                            { x | status = Selected }
-                        else
-                            { x | status = Completed }
-                    ) model.tree }
-                , Cmd.none )            
-
-        Touched node ->
-            ( { model | tree = Tree.indexedMap (toggleIfTarget node.id) model.tree
+                newZipper =
+                    case Zipper.findFromRoot (\x -> x.id == node.id) unSelectCurrentLabel of
+                        Just x ->
+                            Zipper.mapLabel
+                                (\label ->
+                                    if label.id == node.id then
+                                        { label | status = Selected }
+                                    else
+                                        label
+                                )
+                            x
+                        Nothing ->
+                            model.zipper
+            in
+            ( { model 
+                | path = getPath newZipper []
+                , zipper = newZipper
                 , data = node.title }, Cmd.none )
 
         UpdateRawDag response ->
@@ -197,9 +203,13 @@ update msg model =
 
 
         UpdateZipper result ->
+            let
+                indexedTree tree =
+                    Tree.indexedMap (\idx val -> { val | id = idx }) tree
+            in
             case result of
                 Ok x -> 
-                    ({ model | tree = x }, Cmd.none)
+                    ({ model | zipper = Zipper.fromTree <| indexedTree x }, Cmd.none)
                 Err _ ->
                     ({ model | raw_dag = "UPDATE ZIPPER TASK FAIL" }, Cmd.none)
 
@@ -248,12 +258,37 @@ view model =
             , spacing 10
             , padding 10
             , width fill
+            , height (px 500)
             ]
             [ viewControls model
             , viewPath model.path
-            , viewURL model.path
-            , viewTable <| Tree.indexedMap (\idx val -> { val | id = idx }) model.tree
+            , viewTable <| Zipper.toTree <| Zipper.root model.zipper
             ]
+
+viewTable : Tree Node -> Element Msg
+viewTable tree =
+    let
+        alpha =
+            1.0
+
+        color i =
+            case i of
+                0 -> yellow
+                1 -> orange
+                2 -> violet
+                3 -> cyan
+                4 -> blue
+                5 -> green
+                _ -> white
+
+        childMap child =
+            case ( String.toInt <| .name <| Tree.label child ) of
+                Ok int ->
+                    viewSector child <| color int <| alpha
+                Err _ ->
+                    none
+    in
+    column [ scrollbarY, spacing 5 ] <| List.map childMap <| Tree.children tree
 
 viewDataInput : Node -> Element Msg
 viewDataInput node =
@@ -264,15 +299,8 @@ viewDataInput node =
         { onChange = Just UpdateData
         , text = node.title
         , placeholder = Just <| Input.placeholder [] <| text "Введите данные сюда"
-        , label = Input.labelLeft [ padding 5 ] <| text "Данные"
+        , label = Input.labelLeft [ padding 5 ] <| text ("id:" ++ toString node.id)
         }
-
-toggleIfTarget : Int -> Int -> Node -> Node
-toggleIfTarget id index node =
-    if id == index then
-        { node | status = Selected }
-    else
-        { node | status = Completed }
 
 viewFile : File -> Element Msg
 viewFile file =
@@ -321,7 +349,6 @@ viewCell tree color =
         , Font.bold
         , width fill
         , Event.onClick <| GetPath node
-        , Event.onDoubleClick <| Touched node
         ] <|
         column
         [ centerY
@@ -329,6 +356,13 @@ viewCell tree color =
         [ el [ centerX ] <| text <| .name node
         , el [ centerX ] <| text <| toString node.id
         ]
+
+toggleIfTarget : Int -> Int -> Node -> Node
+toggleIfTarget id index node =
+    if id == index then
+        { node | status = Selected }
+    else
+        { node | status = Completed }
 
 viewSector : Tree Node -> Color -> Element Msg
 viewSector tree color =
@@ -357,31 +391,6 @@ viewSector tree color =
         , column [] <| List.map childMap <| Tree.children tree
         ]
 
-viewTable : Tree Node -> Element Msg
-viewTable tree =
-    let
-        alpha =
-            1.0
-
-        color i =
-            case i of
-                0 -> yellow
-                1 -> orange
-                2 -> violet
-                3 -> cyan
-                4 -> blue
-                5 -> green
-                _ -> white
-
-        childMap child =
-            case ( String.toInt <| .name <| Tree.label child ) of
-                Ok int ->
-                    viewSector child <| color int <| alpha
-                Err _ ->
-                    none
-    in
-    column [ spacing 5 ] <| List.map childMap <| Tree.children tree
-
 viewTree : Tree Node -> Element Msg
 viewTree tree =
     let
@@ -401,8 +410,6 @@ viewTree tree =
                         _ -> viewTree x
                 ) <| Tree.children tree
             )
-
-
 
 -- navigation in breadcrumbs
 
@@ -424,17 +431,21 @@ viewNodeinPath node =
         [ padding 5
         , mouseOver <| [ Background.color Color.lightGrey ]
         ]
-        { label = text (node.name ++ "/")
+        { label = text (node.name ++ "(id: " ++ (toString node.id) ++ ")/")
         , onPress = Just <| GetNode node.cid
         }
 
-getPath : Node -> List Node -> List Node
-getPath node acc =
-    case node.parent of
-        Just ( Parent parent ) ->
-            getPath parent (parent :: acc)
+getPath : Zipper Node -> List Node -> List Node
+getPath zipper acc =
+    let
+        appendLabel =
+            (Zipper.label zipper) :: acc
+    in
+    case Zipper.parent zipper of
+        Just parent ->
+            getPath parent appendLabel
         Nothing ->
-            acc
+            appendLabel
 
 viewControls : Model -> Element Msg
 viewControls model =
@@ -460,7 +471,7 @@ viewControls model =
         , Input.button
             style
             { onPress = Just NoOp
-                -- Just <| ObjectPut <| objectEncoderPB model.data <| Zipper.children model.dag
+                -- Just <| ObjectPut <| objectEncoderPB model.data <| Zipper.children model.zipper
             , label = text "obj put"
             }
         , Input.button
@@ -627,7 +638,7 @@ getChildren node =
                 object.links
                     |> List.map
                         (\link -> 
-                            getData (Debug.log "get data from" link)
+                            getData link
                             |> Task.map2 updateTitle (Task.succeed link)
                         )
                     |> Task.sequence

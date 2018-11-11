@@ -14,15 +14,31 @@ init =
     ( initModel
     , Cmd.batch 
         [ Task.attempt UpdateZipper 
-            <| getTree 2 initModel.tree ]
+            <| getTree 2 initTree ]
     )
+
+initModel : Model
+initModel =
+    { root = initNode.cid
+    , data = "" 
+    , zipper = Zipper.fromTree <| initTree
+    , raw_dag = ""
+    , dropZone =
+        DropZone.init
+    , files_to_add = []
+    , content = []
+--    , tree = initTree
+    , path = [ initNode ]
+--    , links = []
+--    , draft = []
+    }
 
 initNode : Node
 initNode =
     { name = "ROOT"
     , cid = "QmQ12hfokJyGXFFMiFaL4TK5eNMPTq2aSy6ng5s9V6rLvb"
     , size = 0
-    , title = "THERE IS NO NODE"
+    , title = ""
     , parent = Nothing
     , status = Completed
 --    , children = Children []
@@ -41,22 +57,6 @@ initTree =
             ]
         , Tree.singleton { initNode | name = "CHILD node" }
         ]
-
-initModel : Model
-initModel =
-    { root = initNode.cid
-    , data = ""
-    , dag = Zipper.fromTree <| Tree.tree initNode []
-    , raw_dag = ""
-    , dropZone =
-        DropZone.init
-    , files_to_add = []
-    , content = []
-    , tree = initTree
---    , links = []
-    , path = [ initNode ]
---    , draft = []
-    }
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
