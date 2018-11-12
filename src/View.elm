@@ -11,7 +11,9 @@ import Task exposing (Task)
 import Result
 import Html exposing (Html)
 import Html.Attributes
--- import Dom
+import Dom
+import String.Extra
+import Html.Lazy
 
 -- STYLISH ELEPHANTS
 import Element as E exposing (..)
@@ -45,7 +47,7 @@ ipfsGatewayUrl =
 
 type alias Model =
     { root : Hash -- query hash (root)
-    , data : Data -- some data to send
+    , data : String -- some data to send
     , zipper : Zipper Node
     , raw_dag : String -- daw dag for response debugging
     , dropZone :
@@ -65,8 +67,8 @@ type alias Node =
     { name : String
     , cid : String
     , size : Int
-    , title : String
-    , parent : Maybe Parent
+    , title : Data
+--    , parent : Maybe Parent
     , status : Status
 --        , children : Children
 --        , content : List File
@@ -74,7 +76,7 @@ type alias Node =
     }
 
 type Children = Children (List Node)
-type Parent = Parent Node
+-- type Parent = Parent Node
 
 type alias File =
     { name : String
@@ -127,6 +129,7 @@ type Msg
     | AddText String
     | DnD (DropZone.DropZoneMessage (List NativeFile))
     | GetPath Node
+    | UpdateFocus Node
 --    | GetModifiedObject (WebData Hash)
 --    | DraftUpdate (Result Http.Error (List Link))
 --    | PatchObjectUpdate (Result Http.Error Hash)
@@ -154,15 +157,23 @@ update msg model =
         UpdateData text ->
             { model | data = text } ! []
 
+        UpdateFocus node ->
+            let
+                updatedLabel = { node | title = model.data }
+            in
+            ( { model | zipper = Zipper.replaceLabel updatedLabel model.zipper }, Cmd.none )
+
         GetPath node ->
             let
                 focusedLabel = Zipper.label model.zipper
                 
-                unSelectCurrentLabel =
+                completeFocusedLabel =
                     Zipper.replaceLabel { focusedLabel | status = Completed } model.zipper
 
+--                    if (focusedLabel.id > node.id) then Zipper.findNext else Zipper.findPrevious
+
                 newZipper =
-                    case Zipper.findFromRoot (\x -> x.id == node.id) unSelectCurrentLabel of
+                    case Zipper.findFromRoot (\x -> x.id == node.id) completeFocusedLabel of
                         Just x ->
                             Zipper.mapLabel
                                 (\label ->
@@ -192,7 +203,7 @@ update msg model =
             ( model, Task.attempt
                 UpdateZipper
                 <| getTree 2
-                <| Tree.tree { name = "HOME", size = 0, cid = hash, title = "", parent = Nothing, status = Completed, id = 0 } []
+                <| Tree.tree { name = "HOME", size = 0, cid = hash, title = "", status = Completed, id = 0 } []
             )
 
         AddText text ->
@@ -246,24 +257,26 @@ update msg model =
 --VIEW
 
 view : Model -> Html Msg
-view model =
+view model =    
     layoutWith { options = 
-        [ focusStyle 
-            { borderColor = Nothing
-            , backgroundColor = Nothing
-            , shadow = Nothing 
-            } ] } [] <|
-        column
-            [ Font.size 12
-            , spacing 10
-            , padding 10
-            , width fill
-            , height (px 500)
-            ]
-            [ viewControls model
-            , viewPath model.path
-            , viewTable <| Zipper.toTree <| Zipper.root model.zipper
-            ]
+            [ focusStyle 
+                { borderColor = Nothing
+                , backgroundColor = Nothing
+                , shadow = Nothing 
+                } ] } [] <|
+            column
+                [ Font.size 12
+                , spacing 10
+                , padding 10
+                , width fill
+                , height (px 500)
+                ]
+                [ viewControls model
+                , viewPath model.path
+                , viewDataInput model.data
+                , viewTable <| Zipper.toTree <| Zipper.root model.zipper
+                ]
+
 
 viewTable : Tree Node -> Element Msg
 viewTable tree =
@@ -290,16 +303,16 @@ viewTable tree =
     in
     column [ scrollbarY, spacing 5 ] <| List.map childMap <| Tree.children tree
 
-viewDataInput : Node -> Element Msg
-viewDataInput node =
+viewDataInput : Data -> Element Msg
+viewDataInput data =
     Input.text
         [ padding 5
-        , Event.onLoseFocus <| ObjectPut <| objectEncoderPB node.title []
+        , Event.onLoseFocus <| NoOp
         ]
         { onChange = Just UpdateData
-        , text = node.title
+        , text = data
         , placeholder = Just <| Input.placeholder [] <| text "Введите данные сюда"
-        , label = Input.labelLeft [ padding 5 ] <| text ("id:" ++ toString node.id)
+        , label = Input.labelLeft [ padding 5 ] <| text ""
         }
 
 viewFile : File -> Element Msg
@@ -337,25 +350,42 @@ viewCell tree color =
        node = Tree.label tree
             
     in
-    el
-        [ if (node.status == Selected)
-            then (Background.color Color.lightGrey) 
-            else (Background.color color)
-        , Border.width 1
-        , Border.color Color.darkGrey
-        , padding 10
-        , htmlAttribute <| Html.Attributes.style [ ( "overflow-wrap", "break-word" ) ]
-        , Font.size 13
-        , Font.bold
-        , width fill
-        , Event.onClick <| GetPath node
-        ] <|
-        column
-        [ centerY
-        ]
-        [ el [ centerX ] <| text <| .name node
-        , el [ centerX ] <| text <| toString node.id
-        ]
+    {-}
+    case node.status of
+                    Selected ->
+                        Input.text
+                            [ padding 5
+                            , Event.onLoseFocus <| UpdateFocus node
+                            ]
+                            { onChange = Just UpdateData
+                            , text = node.title
+                            , placeholder = Just <| Input.placeholder [] <| text "Введите данные сюда"
+                            , label = Input.labelLeft [] <| text ""
+                            }
+                    _ ->
+                
+                -}        
+            el
+                [ if (node.status == Selected)
+                    then (Background.color Color.lightGrey) 
+                    else (Background.color color)
+                , Border.width 1
+                , Border.color Color.darkGrey
+                , padding 10
+                , htmlAttribute <| Html.Attributes.id ("cell-" ++ toString node.id)
+                , htmlAttribute <| Html.Attributes.style [ ( "overflow-wrap", "break-word" ) ]
+                , Font.size 13
+                , Font.bold
+                , width fill
+                , Event.onClick <| GetPath node
+                ] <|
+                column
+                [ centerY
+                ]
+                [ el [ centerX ] <| text <| .name node
+                , el [ centerX ] <| text <| toString node.id
+                , el [ centerX ] <| text <| .title node
+                ]
 
 toggleIfTarget : Int -> Int -> Node -> Node
 toggleIfTarget id index node =
@@ -548,7 +578,6 @@ addText text =
 {-}
 addData : Data -> Task.Task Http.Error
 addData data =
--}
 
 addLink : Hash -> String -> Hash -> Task.Task Http.Error Hash
 addLink parent name cid =
@@ -562,12 +591,13 @@ addLink parent name cid =
 patchObject : Node -> Hash -> Task.Task Http.Error Hash
 patchObject node new_cid =
     case node.parent of
-        Just (Parent parent) ->
+        Just parent ->
             addLink parent.cid node.name new_cid
                 |> Task.andThen (\hash -> patchObject parent hash)
         Nothing -> 
             Task.succeed node.cid
 
+-}
 
 -- BUNCH OF REQUESTS FOR ADDING FILES
 -- [ add files, patch current node, patch path, patch root node ]
@@ -615,7 +645,7 @@ getStats node =
 
 getNode : Node -> Cmd Msg
 getNode node =
-    objectDecoder ( Parent node )
+    objectDecoder node
         |> Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid )
         |> Http.send UpdateNode
 
@@ -624,10 +654,10 @@ getChildren : Node -> Task Http.Error (Tree Node)
 getChildren node =
     let
         updateTitle =
-            (\x data -> Tree.tree { x | title = data, parent = Just (Parent node) } [])
+            (\x data -> Tree.tree { x | title = data } [])
 
         objectGetRequest node =
-            objectDecoder ( Parent node )
+            objectDecoder node
                 |> Http.get ( ipfsApiUrl ++ "object/get?arg=" ++ node.cid )
                 |> Http.toTask
     in
@@ -716,21 +746,20 @@ fileLinkDecoder =
         |> required "Hash" Decode.string
         |> required "Size" sizeDecoder
 
-nodeDecoder : Parent -> Decode.Decoder Node
+nodeDecoder : Node -> Decode.Decoder Node
 nodeDecoder node =    
     decode Node
         |> required "Name" Decode.string
         |> required "Hash" Decode.string
         |> required "Size" Decode.int
         |> optional "Title" Decode.string ""
-        |> hardcoded (Just node)
         |> hardcoded Completed
         |> hardcoded 0
 
-objectDecoder : Parent -> Decode.Decoder Object
-objectDecoder parent =
+objectDecoder : Node -> Decode.Decoder Object
+objectDecoder node =
     decode Object
-        |> required "Links" (Decode.list <| nodeDecoder parent)
+        |> required "Links" (Decode.list <| nodeDecoder node)
         |> required "Data" Decode.string 
 
 pbLinkDecoder : Decode.Decoder Link

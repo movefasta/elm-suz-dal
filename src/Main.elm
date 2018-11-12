@@ -8,7 +8,6 @@ import Task exposing (attempt)
 import Tree exposing (Tree)
 import Tree.Zipper as Zipper exposing (Zipper)
 
-
 init : ( Model, Cmd Msg )
 init =
     ( initModel
@@ -39,7 +38,6 @@ initNode =
     , cid = "QmQ12hfokJyGXFFMiFaL4TK5eNMPTq2aSy6ng5s9V6rLvb"
     , size = 0
     , title = ""
-    , parent = Nothing
     , status = Completed
 --    , children = Children []
 --    , content = []
