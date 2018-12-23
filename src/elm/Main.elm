@@ -3,34 +3,36 @@ module Main exposing (..)
 import View exposing (..)
 import Html exposing (program)
 import Ports
-import DropZone
 import Task exposing (attempt)
 import Tree exposing (Tree)
 import Tree.Zipper as Zipper exposing (Zipper)
 
+
 init : ( Model, Cmd Msg )
 init =
     ( initModel
-    , Cmd.batch 
-        [ Task.attempt UpdateZipper 
-            <| getTree 2 initTree ]
+    , Cmd.batch
+        [ Task.attempt UpdateZipper <|
+            getTree 2 initTree
+        ]
     )
+
 
 initModel : Model
 initModel =
     { root = initNode.cid
-    , data = "" 
+    , data = ""
     , zipper = Zipper.fromTree <| initTree
     , raw_dag = ""
-    , dropZone =
-        DropZone.init
-    , files_to_add = []
     , content = []
---    , tree = initTree
     , path = [ initNode ]
---    , links = []
---    , draft = []
+
+    --    , files_to_add = []
+    --    , tree = initTree
+    --    , links = []
+    --    , draft = []
     }
+
 
 initNode : Node
 initNode =
@@ -39,10 +41,12 @@ initNode =
     , size = 0
     , title = ""
     , status = Completed
---    , children = Children []
---    , content = []
+
+    --    , children = Children []
+    --    , content = []
     , id = 0
     }
+
 
 initTree : Tree Node
 initTree =
@@ -56,9 +60,11 @@ initTree =
         , Tree.singleton { initNode | name = "CHILD node" }
         ]
 
+
 subscriptions : Model -> Sub Msg
 subscriptions _ =
     Ports.receiveData UpdateQuery
+
 
 main : Program Never Model Msg
 main =
