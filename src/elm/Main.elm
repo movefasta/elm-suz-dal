@@ -1,6 +1,8 @@
 module Main exposing (main)
 
 import Browser exposing (Document, document)
+import Bytes
+import Bytes.Encode
 import Element as E exposing (..)
 import Element.Background as Background
 import Element.Border as Border
@@ -47,7 +49,7 @@ initModel : Model
 initModel =
     { root = initNode.cid
     , data = ""
-    , zipper = Zipper.fromTree <| initTree
+    , zipper = Zipper.fromTree <| Tree.singleton initNode
     , raw_dag = ""
     , content = []
     , path = [ initNode ]
@@ -63,19 +65,6 @@ initNode =
     , status = Completed
     , id = 0
     }
-
-
-initTree : Tree Node
-initTree =
-    Tree.tree initNode
-        [ Tree.tree { initNode | name = "CHILD tree" }
-            [ Tree.singleton { initNode | name = "grand CHILD1" }
-            , Tree.tree { initNode | name = "grand CHILD2" }
-                [ Tree.singleton { initNode | name = "grand grand CHILD tree" }
-                ]
-            ]
-        , Tree.singleton { initNode | name = "CHILD node" }
-        ]
 
 
 
@@ -108,8 +97,33 @@ type alias Model =
 
 type Status
     = Editing
+    | Loading
     | Completed
     | Selected
+
+
+type Thing
+    = Phase
+    | Structure
+    | Level
+    | Tensor
+    | Sector
+    | Row
+    | Cell
+
+
+type Colored
+    = Yellow
+    | Red
+    | Violet
+    | Blue
+    | Cyan
+    | Green
+
+
+type Table
+    = Spiral Colored
+    | Polyhedron Colored
 
 
 type alias Node =
@@ -120,14 +134,6 @@ type alias Node =
     , status : Status
     , id : Int
     }
-
-
-type Children
-    = Children (List Node)
-
-
-
--- type Parent = Parent Node
 
 
 type alias File =
@@ -180,6 +186,14 @@ type alias Data =
     String
 
 
+type alias Url =
+    String
+
+
+type alias Method =
+    String
+
+
 type Msg
     = NoOp
     | UpdateQuery Hash
@@ -190,7 +204,8 @@ type Msg
     | AddFile (Result Http.Error Link)
     | AddText String
     | GetPath Node
-    | UpdateFocus Node
+    | UpdateFocus Data
+    | GetNewHash (Result.Result Http.Error Hash)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -212,13 +227,24 @@ update msg model =
         UpdateQuery hash ->
             ( { model | root = hash }, Cmd.none )
 
+        GetNewHash result ->
+            case result of
+                Ok cid ->
+                    ( { model | root = cid }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
         UpdateData text ->
             ( { model | data = text }, Cmd.none )
 
-        UpdateFocus node ->
+        UpdateFocus data ->
             let
+                currentLabel =
+                    Zipper.label model.zipper
+
                 updatedLabel =
-                    { node | title = model.data }
+                    { currentLabel | title = data }
             in
             ( { model | zipper = Zipper.replaceLabel updatedLabel model.zipper }, Cmd.none )
 
@@ -230,7 +256,6 @@ update msg model =
                 completeFocusedLabel =
                     Zipper.replaceLabel { focusedLabel | status = Completed } model.zipper
 
-                --                    if (focusedLabel.id > node.id) then Zipper.findNext else Zipper.findPrevious
                 newZipper =
                     case Zipper.findFromRoot (\x -> x.id == node.id) completeFocusedLabel of
                         Just x ->
@@ -256,13 +281,13 @@ update msg model =
             )
 
         GetNode cid ->
-            ( model, getNode cid )
+            ( { model | root = cid }, getNode cid )
 
         AddText text ->
             ( model, addText text )
 
         ObjectPut value ->
-            ( model, Cmd.none )
+            ( model, objectPut value )
 
         UpdateZipper result ->
             let
@@ -310,12 +335,13 @@ view model =
           <|
             column
                 [ Font.size 12
+                , Font.family [ Font.typeface "Ubuntu-Regular", Font.sansSerif ]
                 , spacing 10
                 , padding 10
                 , width fill
                 ]
                 [ viewControls model
-                , viewPath model.path
+                , row [] [ viewPath model.path, E.text <| .cid <| Zipper.label <| model.zipper ]
                 , viewDataInput model.data
                 , viewTable <| Zipper.toTree <| Zipper.root model.zipper
                 ]
@@ -360,7 +386,7 @@ viewTable tree =
                 Nothing ->
                     none
     in
-    column [ height fill, width fill, spacing 5 ] <| List.map childMap <| Tree.children tree
+    column [ height <| px 800, width fill, spacing 5, scrollbarY ] <| List.map childMap <| Tree.children tree
 
 
 viewTree : Tree Node -> Element Msg
@@ -390,6 +416,20 @@ viewTree tree =
                )
 
 
+
+{- }
+   viewSectorAsTable : Tree Node -> Color -> Element Msg
+   viewSectorAsTable tree color =
+       let
+           data =
+               { data = List.map (\child -> Tree.label child) <| Tree.children tree
+               , columns = [ { header = viewCell tree color, width = fill, view = \_ -> viewCell } ]
+               }
+       in
+       E.table [] data
+-}
+
+
 viewSector : Tree Node -> Color -> Element Msg
 viewSector tree color =
     let
@@ -400,6 +440,8 @@ viewSector tree color =
                         [ spacing 5
                         , padding 5
                         , width fill
+                        , height fill
+                        , htmlAttribute <| Html.Attributes.style "overflow-wrap" "inherit"
                         ]
                     <|
                         [ viewCell child <| white 1.0 ]
@@ -422,9 +464,25 @@ viewSector tree color =
     column
         [ spacing 5
         , width fill
+        , height fill
         ]
-        [ viewCell tree <| white 1.0
-        , column [] <| List.map childMap <| Tree.children tree
+        [ el
+            [ Font.size 20
+            , centerX
+            , paddingXY 5 15
+            , Event.onClick <| GetPath <| Tree.label tree
+            ]
+          <|
+            text <|
+                .title <|
+                    Tree.label tree
+        , column
+            [ width fill
+            , height fill
+            ]
+          <|
+            List.map childMap <|
+                Tree.children tree
         ]
 
 
@@ -434,7 +492,7 @@ viewCell tree color =
         node =
             Tree.label tree
     in
-    el
+    textColumn
         [ if node.status == Selected then
             Background.color <| lightGrey 1.0
 
@@ -444,34 +502,31 @@ viewCell tree color =
         , Border.color <| darkGrey 1.0
         , padding 10
         , htmlAttribute <| Html.Attributes.id <| String.concat [ "cell-", String.fromInt node.id ]
-        , htmlAttribute <| Html.Attributes.style "overflow-wrap" "break-word"
-        , Font.size 13
-        , Font.bold
         , Event.onClick <| GetPath node
         , width fill
+        , height fill
         ]
-    <|
-        column
-            [ centerY
-            , centerX
-            , width fill
+        [ -- el [ Font.bold ] <| text <| .name node
+          --, el [ Font.bold ] <| text <| Debug.toString <| .id node
+          paragraph
+            [ width fill
             ]
-            [ el [ centerX ] <| text <| .name node
-            , el [ centerX ] <| text <| Debug.toString node.id
-            , el [ centerX ] <| text <| .title node
-            ]
+            [ text <| .title node ]
+        ]
 
 
 viewDataInput : Data -> Element Msg
 viewDataInput data =
     Input.text
         [ padding 5
-        , Event.onLoseFocus <| NoOp
+        , height shrink
+        , Event.onLoseFocus <| UpdateFocus data
         ]
         { onChange = UpdateData
         , text = data
         , placeholder = Just <| Input.placeholder [] <| text "Введите данные сюда"
-        , label = Input.labelLeft [ padding 5 ] <| text ""
+        , label = Input.labelHidden "Data input"
+        -- , spellcheck = False
         }
 
 
@@ -583,9 +638,20 @@ viewControls model =
             }
         , Input.button
             style
-            { onPress = Just NoOp
+            { onPress =
+                let
+                    rootZipper =
+                        Zipper.root model.zipper
 
-            -- Just <| ObjectPut <| objectEncoderPB model.data <| Zipper.children model.zipper
+                    data =
+                        rootZipper |> Zipper.label |> .title
+
+                    links =
+                        rootZipper |> Zipper.children |> List.map (\tree -> Tree.label tree)
+                in
+                objectEncoder data links
+                    |> ObjectPut
+                    |> Just
             , label = text "obj put"
             }
         , Input.button
@@ -611,7 +677,6 @@ viewData data =
     column
         [ Font.color <| darkGrey 1.0
         , Background.color <| white 1.0
-        , Font.family fontFamily
         ]
         [ Input.multiline
             [ padding 5 ]
@@ -629,6 +694,29 @@ viewData data =
 -- IPFS OBJECT API REQUESTS TURNED INTO TASKS FOR CHAINING
 
 
+turnToBytesPart : String -> String -> Encode.Value -> Http.Part
+turnToBytesPart message mime json =
+    Encode.encode 0 json
+        |> Bytes.Encode.string
+        |> Bytes.Encode.encode
+        |> Http.bytesPart message mime
+
+
+objectPut : Value -> Cmd Msg
+objectPut value =
+    Http.request
+        { method = "POST"
+        , url = ipfsApiUrl ++ "object/put"
+        , headers = []
+        , body =
+            Http.multipartBody
+                [ turnToBytesPart "whatever" "application/json" value ]
+        , expect = Http.expectJson GetNewHash cidDecoder
+        , timeout = Nothing
+        , tracker = Just "upload"
+        }
+
+
 getStats : Hash -> Task Http.Error Node
 getStats hash =
     Http.task
@@ -641,17 +729,8 @@ getStats hash =
         }
         |> Task.andThen
             (\stat ->
-                Task.succeed
-                    { initNode | size = stat.cumulativeSize, cid = stat.hash }
+                Task.succeed { initNode | size = stat.cumulativeSize, cid = stat.hash }
             )
-
-
-type alias Url =
-    String
-
-
-type alias Method =
-    String
 
 
 ipfsRequest : Url -> Method -> Node -> Decode.Decoder a -> Task Http.Error a
@@ -775,6 +854,30 @@ dataDecoder =
 
 
 -- DECODERS
+{-
+   treeDecoder : Decode.Decoder (Tree Node)
+   treeDecoder =
+       Decode.map2 Tree.tree
+           (Decode.field "Data" Decode.string)
+           (Decode.field "Links" (Decode.map ))
+
+
+   Decode.map2 Node
+               (Decode.field "value" nodeDecoder)
+               (Decode.field "children" (Decode.lazy (\_ -> decoder nodeDecoder |> Decode.list)))
+           ]
+-}
+
+
+nodeDecoder : Node -> Decode.Decoder Node
+nodeDecoder node =
+    Decode.succeed Node
+        |> required "Name" Decode.string
+        |> required "Hash" Decode.string
+        |> required "Size" Decode.int
+        |> optional "Title" Decode.string ""
+        |> hardcoded Completed
+        |> hardcoded 0
 
 
 mtypeDecoder : Decode.Decoder (Maybe MimeType)
@@ -788,17 +891,6 @@ fileLinkDecoder =
         |> required "Name" Decode.string
         |> required "Hash" Decode.string
         |> required "Size" sizeDecoder
-
-
-nodeDecoder : Node -> Decode.Decoder Node
-nodeDecoder node =
-    Decode.succeed Node
-        |> required "Name" Decode.string
-        |> required "Hash" Decode.string
-        |> required "Size" Decode.int
-        |> optional "Title" Decode.string ""
-        |> hardcoded Completed
-        |> hardcoded 0
 
 
 objectDecoder : Node -> Decode.Decoder Object
@@ -837,6 +929,11 @@ onlyHashDecoder =
     Decode.field "Hash" Decode.string
 
 
+cidDecoder : Decode.Decoder Hash
+cidDecoder =
+    Decode.at [ "Cid", "/" ] Decode.string
+
+
 objectModifiedDecoder : Decode.Decoder ModifiedObject
 objectModifiedDecoder =
     Decode.succeed ModifiedObject
@@ -848,63 +945,21 @@ objectModifiedDecoder =
 -- ENCODERS
 
 
-objectEncoderPB : Data -> List Node -> Value
-objectEncoderPB data list =
+objectEncoder : Data -> List Node -> Value
+objectEncoder data list =
     Encode.object
         [ ( "Data", Encode.string data )
-        , ( "Links", Encode.list linkEncoderPB list )
+        , ( "Links", Encode.list linkEncoder list )
         ]
 
 
-dagNodePbEncoder : List Link -> List Value
-dagNodePbEncoder list =
-    List.map linkApiEncoderPB list
-
-
-linkEncoderPB : Node -> Value
-linkEncoderPB node =
+linkEncoder : Node -> Value
+linkEncoder node =
     Encode.object
-        [ ( "name", Encode.string node.name )
-        , ( "size", Encode.int node.size )
-        , ( "multihash", Encode.string node.cid )
+        [ ( "Name", Encode.string node.name )
+        , ( "Size", Encode.int node.size )
+        , ( "Hash", Encode.string node.cid )
         ]
-
-
-objectApiEncoder : Data -> List Node -> Value
-objectApiEncoder data list =
-    Encode.object
-        [ ( "Data", Encode.string data )
-        , ( "Links", Encode.list linkEncoderPB list )
-        ]
-
-
-linkApiEncoderPB : Link -> Value
-linkApiEncoderPB link =
-    Encode.object
-        [ ( "Name", Encode.string link.name )
-        , ( "Size", Encode.int link.size )
-        , ( "Hash", Encode.string link.cid )
-        ]
-
-
-
--- HELPERS
-
-
-maybeRemote : (a -> Element Msg) -> WebData a -> Element Msg
-maybeRemote viewFunction response =
-    case response of
-        RemoteData.NotAsked ->
-            text ""
-
-        RemoteData.Loading ->
-            text "Loading..."
-
-        RemoteData.Success object ->
-            viewFunction object
-
-        RemoteData.Failure error ->
-            text (Debug.toString error)
 
 
 
@@ -957,44 +1012,30 @@ darkGrey alpha =
 
 
 
--- FONTS
-
-
-fontFamily : List Font
-fontFamily =
-    [ Font.typeface "Source Sans Pro"
-    , Font.typeface "Trebuchet MS"
-    , Font.typeface "Lucida Grande"
-    , Font.typeface "Bitstream Vera Sans"
-    , Font.typeface "Helvetica Neue"
-    , Font.typeface "sans-serif"
-    ]
-
-
-
 {- }
-   addLink : Hash -> String -> Hash -> Task.Task Http.Error Hash
-   addLink parent name cid =
-       Http.get ( ipfsApiUrl
-                       ++ "object/patch/add-link?arg=" ++ parent
-                       ++ "&arg=" ++ name
-                       ++ "&arg=" ++ cid )
-                   (Decode.field "Hash" Decode.string)
-                   |> Http.toTask
+   -- BUNCH OF REQUESTS FOR ADDING FILES
+   -- [ add files, patch current node, patch path, patch root node ]
 
-   patchObject : Node -> Hash -> Task.Task Http.Error Hash
-   patchObject node new_cid =
-       case node.parent of
-           Just parent ->
-               addLink parent.cid node.name new_cid
-                   |> Task.andThen (\hash -> patchObject parent hash)
-           Nothing ->
-               Task.succeed node.cid
 
--}
--- BUNCH OF REQUESTS FOR ADDING FILES
--- [ add files, patch current node, patch path, patch root node ]
-{- }
+      addLink : Hash -> String -> Hash -> Task.Task Http.Error Hash
+      addLink parent name cid =
+          Http.get ( ipfsApiUrl
+                          ++ "object/patch/add-link?arg=" ++ parent
+                          ++ "&arg=" ++ name
+                          ++ "&arg=" ++ cid )
+                      (Decode.field "Hash" Decode.string)
+                      |> Http.toTask
+
+
+      patchObject : Node -> Hash -> Task.Task Http.Error Hash
+      patchObject node new_cid =
+          case node.parent of
+              Just parent ->
+                  addLink parent.cid node.name new_cid
+                      |> Task.andThen (\hash -> patchObject parent hash)
+              Nothing ->
+                  Task.succeed node.cid
+
 
    addFileRequest : NativeFile -> Task.Task Http.Error Link
    addFileRequest nf =
@@ -1005,11 +1046,11 @@ fontFamily =
            Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
                |> Http.toTask
 
+
    addFiles : List NativeFile -> Cmd Msg
    addFiles nf_list =
        (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
            |> Task.attempt DraftUpdate
-
 
 
    patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
@@ -1017,7 +1058,7 @@ fontFamily =
        case path of
            (childname, childhash) :: (parentname, parenthash) :: xs ->
                addLink parenthash
-                   { name = childname, size = 0, cid = hash, obj_type = 2, status = Completed }
+                   { name = childname, size = 0, cid = hash, title = 2, status = Completed }
                    |> Task.andThen
                        (\hash ->
                            patchPath (acc ++ [(parentname, hash)]) ((parentname, parenthash) :: xs) hash )
