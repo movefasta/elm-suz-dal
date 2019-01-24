@@ -5,9 +5,11 @@ module Main exposing (main)
 
 import Browser exposing (Document, document)
 import Browser.Dom as Dom
+import Browser.Navigation as Nav
 import Bytes
 import Bytes.Encode
 import Element as E exposing (..)
+import Element.Lazy exposing (lazy, lazy2)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Events as Event
@@ -29,15 +31,18 @@ import Result
 import Task exposing (Task)
 import Tree exposing (Tree)
 import Tree.Zipper as Zipper exposing (Zipper)
+import Url
 
 
-main : Program Value Model Msg
+main : Program () Model Msg
 main =
-    Browser.document
-        { init = \_ -> ( initModel, getNode initNode.cid )
+    Browser.application
+        { init = init
         , view = view
         , update = update
         , subscriptions = subscriptions
+        , onUrlRequest = LinkClicked
+        , onUrlChange = UrlChanged
         }
 
 
@@ -46,32 +51,29 @@ subscriptions _ =
     Sub.none
 
 
+init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
+    let
+        zipper =
+            Zipper.fromTree <| Tree.singleton initNode
+    in
+    ( Model initNode.cid zipper [] [ initNode ] False "" [] key url, getNode initNode.cid )
+
+
 
 -- CONSTANTS
 
 
-initModel : Model
-initModel =
-    { root = initNode.cid
-    , data = ""
-    , zipper = Zipper.fromTree <| Tree.singleton initNode
-    , raw_dag = ""
-    , upload = []
-    , path = [ initNode ]
-    , hover = False
-    , addtext = ""
-    }
-
-
 initNode : Node
 initNode =
-    { name = "ROOT"
-    , cid = "QmPcEu59DUhZGz4woYgDL22bZ6byCVNt97m5ds2QwUMqUo"
-    , size = 0
-    , title = ""
+    { id = 0
     , status = Completed
-    , id = 0
-    , content = []
+    , name = "ROOT"
+    , cid = "zdpuAuS47nYz9ZC4zvirXK5ze1P3RFwPQ4L6BR8BXH8HBEVSQ"
+    , size = 0
+    , description = "Корень дерева трактовочной сети"
+    , mimetype = Nothing
+    , color = 0
     }
 
 
@@ -90,46 +92,36 @@ ipfsGatewayUrl =
 
 
 type alias Model =
-    { root : Hash -- query hash (root)
-    , data : String -- some data to send
+    { root : Hash
     , zipper : Zipper Node
-    , raw_dag : String -- daw dag for response debugging
-    , upload : List File -- file list
+    , upload : List File -- fileReader API buffer
     , path : List Node -- dag nodes path
     , hover : Bool
     , addtext : String
+    , content : List Node
+    , key : Nav.Key
+    , url : Url.Url
     }
 
 
 type alias Node =
-    { name : String
-    , cid : String
-    , size : Int
-    , title : Data
+    { id : Id
     , status : Status
-    , id : Id
-    , content : List Link
-    }
-
-
-type alias Content a =
-    { a
-        | id : Id
-        , cid : String
-        , size : Int
-        , title : String
-        , status : Status
-    }
-
-
-type alias Link =
-    { name : String
-    , cid : String
+    , name : String
+    , cid : Hash
     , size : Int
+    , description : String
     , mimetype : Maybe Mime.MimeType
-    , preview : String
-    , id : Id
-    , status : Status
+    , color : Int
+    }
+
+
+type alias IpfsNodeID =
+    { id : String
+    , publicKey : String
+    , addresses : List String
+    , agentVersion : String
+    , protocolVersion : String
     }
 
 
@@ -141,13 +133,20 @@ type Status
 
 
 type Action
-    = Remove Link
-    | Set Link
-    | Move Link Int
+    = Remove Node
+    | Set Node
+    | Move Node Int
 
 
 
 -- OBJECT API TYPES FOR DECODE IPFS RESPONSES
+
+
+type alias Link =
+    { name : String
+    , hash : String
+    , size : Int
+    }
 
 
 type alias Object =
@@ -170,15 +169,7 @@ type alias Hash =
     String
 
 
-type alias Data =
-    String
-
-
 type alias Url =
-    String
-
-
-type alias Method =
     String
 
 
@@ -186,25 +177,39 @@ type alias Id =
     Int
 
 
+
+{-
+   type Page
+       = Loading Session.Data
+       | Krugozor Krugozor.Model
+       | Level Levels.Model
+       | Tensor Structure.Model
+       | Profile Profile.Model
+-}
+
+
 type Msg
     = NoOp
     | UpdateQuery Hash
-    | UpdateData String
     | GetNode Hash
-    | ObjectPut Value
-    | UpdateZipper (Result Http.Error (Tree Node))
+    | DagPut Value
+    | UpdateZipper (Result.Result Http.Error (Tree Node))
+    | GetRootHash (Result.Result Http.Error Hash)
+    | GetContentHash (Result.Result Http.Error Hash)
+    | GetNodeContent (Result.Result Http.Error (List Node))
     | AddText String
     | ChangeFocus Node
     | UpdateFocus Node
-    | GetNewHash (Result.Result Http.Error Hash)
     | DownloadAsJson String
     | Pick
     | GotFiles File (List File)
-    | Uploading (Result Http.Error (List Link))
+    | Content (Result.Result Http.Error (List Node))
+    | Perform Action
+    | UpdateAddText String
     | DragEnter
     | DragLeave
-    | UpdateAddText String
-    | Perform Action
+    | LinkClicked Browser.UrlRequest
+    | UrlChanged Url.Url
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -216,6 +221,17 @@ update msg model =
     case msg of
         NoOp ->
             ( model, Cmd.none )
+
+        LinkClicked urlRequest ->
+            case urlRequest of
+                Browser.Internal url ->
+                    ( model, Nav.pushUrl model.key (Url.toString url) )
+
+                Browser.External href ->
+                    ( model, Nav.load href )
+
+        UrlChanged url ->
+            ( { model | url = url }, Cmd.none )
 
         Pick ->
             ( model, File.Select.files [ "*" ] GotFiles )
@@ -234,29 +250,26 @@ update msg model =
                         , headers = []
                         , url = ipfsApiUrl ++ "add"
                         , body = Http.multipartBody [ Http.filePart "file" body ]
-                        , resolver = Http.stringResolver <| expect linkDecoder
+                        , resolver = Http.stringResolver <| expect <| Decode.andThen linkToNodeDecoder <| objLinkDecoder
                         , timeout = Nothing
                         }
                         |> Task.andThen
-                            (\link ->
+                            (\x ->
                                 Task.succeed
-                                    { link | mimetype = File.mime file |> Mime.parseMimeType }
+                                    { x | mimetype = File.mime file |> Mime.parseMimeType }
                             )
             in
             ( { model | upload = [], hover = False }
-            , List.map upload (file :: files) |> Task.sequence |> Task.attempt Uploading
+            , List.map upload (file :: files)
+                |> Task.sequence
+                |> Task.attempt Content
             )
 
-        Uploading result ->
+        Content result ->
             case result of
                 Ok list ->
                     ( { model
-                        | zipper =
-                            Zipper.replaceLabel
-                                { label
-                                    | content = List.indexedMap (\i a -> { a | id = i }) (list ++ label.content)
-                                }
-                                model.zipper
+                        | content = List.indexedMap (\i a -> { a | id = i }) (list ++ model.content)
                         , addtext =
                             if List.isEmpty list then
                                 ""
@@ -264,7 +277,7 @@ update msg model =
                             else
                                 model.addtext
                       }
-                    , Cmd.none
+                    , dagPut GetContentHash cidDecoder <| Encode.list contentEncoder (list ++ model.content)
                     )
 
                 Err _ ->
@@ -273,7 +286,7 @@ update msg model =
         UpdateQuery hash ->
             ( { model | root = hash }, Cmd.none )
 
-        GetNewHash result ->
+        GetRootHash result ->
             case result of
                 Ok cid ->
                     ( { model | root = cid }, Cmd.none )
@@ -281,11 +294,32 @@ update msg model =
                 Err _ ->
                     ( model, Cmd.none )
 
+        GetNodeContent result ->
+            case result of
+                Ok nodes ->
+                    ( { model | content = List.indexedMap (\i a -> { a | id = i }) nodes }, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        GetContentHash result ->
+            case result of
+                Ok cid ->
+                    let
+                        updatedZipper =
+                            Zipper.replaceLabel
+                                { label | cid = cid, size = List.sum <| List.map .size model.content }
+                                model.zipper
+                    in
+                    ( { model | zipper = updatedZipper }
+                    , dagPut GetRootHash cidDecoder <| treeEncoder 0 <| Zipper.toTree <| updatedZipper
+                    )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
         DownloadAsJson str ->
             ( model, File.Download.string "136_structure.json" "application/json" str )
-
-        UpdateData text ->
-            ( { model | data = text }, Cmd.none )
 
         AddText data ->
             ( model
@@ -315,35 +349,26 @@ update msg model =
                         Nothing ->
                             model.zipper
             in
-            ( { model
-                | zipper = newZipper
-                , data = node.title
-
-                --, path = getPath newZipper []
-              }
+            ( { model | zipper = newZipper, content = [] }
             , if node.status == Editing then
-                Task.attempt (\_ -> NoOp) <| Dom.focus ("cell-" ++ String.fromInt node.id)
+                Task.attempt
+                    (\_ -> NoOp)
+                <|
+                    Dom.focus ("cell-" ++ String.fromInt node.id)
 
               else
-                Cmd.none
+                Http.get
+                    { url = ipfsApiUrl ++ "dag/get?arg=" ++ node.cid
+                    , expect = Http.expectJson GetNodeContent contentDecoder
+                    }
             )
 
         GetNode cid ->
             ( { model | root = cid }, getNode cid )
 
-        ObjectPut value ->
+        DagPut value ->
             ( model
-            , Http.request
-                { method = "POST"
-                , url = ipfsApiUrl ++ "object/put"
-                , headers = []
-                , body =
-                    Http.multipartBody
-                        [ turnToBytesPart "whatever" "application/json" value ]
-                , expect = Http.expectJson GetNewHash cidDecoder
-                , timeout = Nothing
-                , tracker = Just "upload"
-                }
+            , dagPut GetRootHash cidDecoder value
             )
 
         UpdateZipper result ->
@@ -356,12 +381,12 @@ update msg model =
                     ( { model | zipper = Zipper.fromTree <| indexedTree x }, Cmd.none )
 
                 Err _ ->
-                    ( { model | raw_dag = "UPDATE ZIPPER TASK FAIL" }, Cmd.none )
+                    ( model, Cmd.none )
 
         Perform action ->
             let
                 links =
-                    label.content
+                    model.content
                         |> (case action of
                                 Remove link ->
                                     List.Extra.removeAt link.id
@@ -372,7 +397,7 @@ update msg model =
                                         >> List.indexedMap (\i a -> { a | id = i })
 
                                 Set link ->
-                                    List.map
+                                    List.map 
                                         (\x ->
                                             if x.id == link.id then
                                                 link
@@ -382,17 +407,18 @@ update msg model =
                                         )
                            )
             in
-            ( { model | zipper = Zipper.replaceLabel { label | content = links } model.zipper }
+            ( { model | content = links }
             , case action of
                 Set link ->
-                    if link.status == Editing then
-                        Task.attempt (\_ -> NoOp) <| Dom.focus ("link-" ++ String.fromInt link.id)
-
-                    else
-                        Cmd.none
+                    case link.status of
+                        Editing -> 
+                            Task.attempt (\_ -> NoOp) <| Dom.focus ("file-id-" ++ String.fromInt link.id)
+                        
+                        _ ->
+                            Cmd.none
 
                 _ ->
-                    Cmd.none
+                    dagPut GetContentHash cidDecoder <| Encode.list contentEncoder links
             )
 
 
@@ -431,30 +457,16 @@ view model =
                 --, row [] [ viewPath model.path, E.text <| .cid label ]
                 , row
                     [ width fill ]
-                    [ viewTable <| Zipper.toTree model.zipper
-                    , viewContent model.addtext <| .content label
+                    [ lazy viewTable <| Zipper.toTree model.zipper
+                    , lazy2 viewContent model.addtext model.content
                     ]
                 ]
         ]
     }
 
 
-viewDataInput : Node -> Element Msg
-viewDataInput node =
-    Input.text
-        [ padding 5
-        , height shrink
-        , Event.onLoseFocus <| UpdateFocus node
-        ]
-        { onChange = UpdateData
-        , text = node.title
-        , placeholder = Just <| Input.placeholder [] <| text "Введите данные сюда"
-        , label = Input.labelHidden "Data input"
-        }
-
-
-viewContent : String -> List Link -> Element Msg
-viewContent string links =
+viewContent : String -> List Node -> Element Msg
+viewContent string nodes =
     let
         buttonStyle =
             [ padding 5
@@ -498,12 +510,12 @@ viewContent string links =
             , label = Input.labelHidden "Data input"
             , spellcheck = True
             }
-        , column [ width fill ] <| List.map viewLink links
+        , column [ width fill ] <| List.map viewNodeAsFile nodes
         ]
 
 
-viewLinkActions : Link -> Element Msg
-viewLinkActions link =
+viewNodeActions : Node -> Element Msg
+viewNodeActions node =
     let
         actionStyle =
             [ mouseOver <| [ Background.color <| lightGrey 1.0 ]
@@ -516,7 +528,7 @@ viewLinkActions link =
         [ width fill ]
     <|
         row
-            [ if link.status /= Selected then
+            [ if node.status /= Selected then
                 htmlAttribute <| Html.Attributes.style "visibility" "hidden"
 
               else
@@ -524,33 +536,38 @@ viewLinkActions link =
             , spacing 5
             , padding 5
             ]
-            [ Input.button actionStyle
-                { onPress = Just <| Perform <| Set { link | status = Editing }
+            [ newTabLink
+                actionStyle
+                { url = ipfsGatewayUrl ++ node.cid
+                , label = text "открыть"
+                }
+            , Input.button actionStyle
+                { onPress = Just <| Perform <| Set { node | status = Editing }
                 , label = text "править"
                 }
             , downloadAs
                 actionStyle
                 { label = text "загрузить"
-                , filename = link.name
-                , url = ipfsGatewayUrl ++ link.cid
+                , filename = node.name
+                , url = ipfsGatewayUrl ++ node.cid
                 }
             , Input.button actionStyle
-                { onPress = Just <| Perform <| Move link -1
+                { onPress = Just <| Perform <| Move node -1
                 , label = text "˄"
                 }
             , Input.button actionStyle
-                { onPress = Just <| Perform <| Move link 1
+                { onPress = Just <| Perform <| Move node 1
                 , label = text "˅"
                 }
             , Input.button actionStyle
-                { onPress = Just <| Perform <| Remove link
+                { onPress = Just <| Perform <| Remove node
                 , label = text "x"
                 }
             ]
 
 
-viewLink : Link -> Element Msg
-viewLink link =
+viewNodeAsFile : Node -> Element Msg
+viewNodeAsFile node =
     let
         style =
             [ width fill
@@ -559,7 +576,7 @@ viewLink link =
 
         selectStyle =
             [ width fill
-            , Event.onClick <| Perform <| Set { link | status = Completed }
+            , Event.onClick <| Perform <| Set { node | status = Completed }
             , Border.width 1
             , Border.dashed
             , Border.color <| darkGrey 1.0
@@ -568,12 +585,12 @@ viewLink link =
         anotherStyle =
             [ width fill
             , Event.onClick <|
-                case link.status of
+                case node.status of
                     Editing ->
                         NoOp
 
                     _ ->
-                        Perform <| Set { link | status = Selected }
+                        Perform <| Set { node | status = Selected }
             , Border.width 1
             , Border.dashed
             , Border.color <| white 1.0
@@ -582,52 +599,49 @@ viewLink link =
     in
     column
         style
-        [ viewLinkActions link
+        [ viewNodeActions node
         , el
-            (if link.status /= Selected then
+            (if node.status /= Selected then
                 anotherStyle
 
              else
                 selectStyle
             )
           <|
-            case link.mimetype of
+            case node.mimetype of
                 Just (Mime.Image _) ->
                     image [ width fill ]
-                        { src = ipfsGatewayUrl ++ link.cid
-                        , description = link.name
+                        { src = ipfsGatewayUrl ++ node.cid
+                        , description = node.name
                         }
 
                 Just (Mime.Text Mime.PlainText) ->
                     let
-                        contentLength =
-                            String.length link.preview
-
                         font =
-                            if contentLength <= 140 then
+                            if node.size <= 140 then
                                 [ Font.size 24
                                 ]
 
-                            else if contentLength > 140 && contentLength <= 500 then
+                            else if node.size > 140 && node.size <= 500 then
                                 [ Font.italic
                                 , Font.size 16
                                 ]
 
-                            else if contentLength > 500 && contentLength <= 1800 then
+                            else if node.size > 500 && node.size <= 1800 then
                                 [ Font.size 14 ]
 
                             else
                                 []
                     in
-                    if link.status == Editing then
+                    if node.status == Editing then
                         Input.multiline
                             [ height shrink
                             , width fill
-                            , htmlAttribute <| Html.Attributes.id <| String.concat [ "link-", String.fromInt link.id ]
-                            , Event.onLoseFocus <| Perform <| Set { link | status = Selected }
+                            , htmlAttribute <| Html.Attributes.id <| String.concat [ "file-id-", String.fromInt node.id ]
+                            , Event.onLoseFocus <| Perform <| Set { node | status = Selected }
                             ]
-                            { onChange = \new -> Perform <| Set { link | preview = new }
-                            , text = link.preview
+                            { onChange = \new -> Perform <| Set { node | description = new }
+                            , text = node.description
                             , placeholder = Just <| Input.placeholder [] <| el [] none
                             , label = Input.labelHidden "Text data input"
                             , spellcheck = True
@@ -636,7 +650,7 @@ viewLink link =
                     else
                         paragraph
                             ([ width fill, padding 5, clip ] ++ font)
-                            [ text link.preview ]
+                            [ text node.description ]
 
                 _ ->
                     row
@@ -650,7 +664,7 @@ viewLink link =
                             , htmlAttribute <| Html.Attributes.style "text-overflow" "ellipsis"
                             ]
                           <|
-                            text link.name
+                            text node.name
                         , el
                             [ Font.color <| darkGrey 1.0
                             , padding 5
@@ -660,7 +674,7 @@ viewLink link =
                           <|
                             text <|
                                 "("
-                                    ++ Filesize.format link.size
+                                    ++ Filesize.format node.size
                                     ++ ")"
                         ]
         ]
@@ -676,14 +690,8 @@ viewControls model =
             , mouseOver <| [ Background.color <| lightGrey 1.0 ]
             ]
 
-        rootZipper =
-            Zipper.root model.zipper
-
-        data =
-            rootZipper |> Zipper.label |> .title
-
-        links =
-            rootZipper |> Zipper.children |> List.map Tree.label
+        treeToJson =
+            treeEncoder 0 <| Zipper.toTree <| model.zipper
     in
     row
         [ spacing 5, width fill ]
@@ -698,12 +706,12 @@ viewControls model =
             }
         , Input.button
             style
-            { onPress = Just <| ObjectPut <| objectEncoder data links
-            , label = text "obj put"
+            { onPress = Just <| DagPut treeToJson
+            , label = text "dag put"
             }
         , Input.button
             style
-            { onPress = Just <| DownloadAsJson <| Encode.encode 4 <| treeEncoder 0 <| Zipper.toTree <| model.zipper
+            { onPress = Just <| DownloadAsJson <| Encode.encode 4 treeToJson
             , label = text "download json"
             }
         ]
@@ -714,37 +722,6 @@ viewTable tree =
     let
         alpha =
             0.7
-
-        color i =
-            case i of
-                0 ->
-                    yellow
-
-                1 ->
-                    orange
-
-                2 ->
-                    violet
-
-                3 ->
-                    blue
-
-                4 ->
-                    cyan
-
-                5 ->
-                    green
-
-                _ ->
-                    white
-
-        childMap child =
-            case String.toInt <| .name <| Tree.label child of
-                Just int ->
-                    viewSector child <| color int <| alpha
-
-                Nothing ->
-                    none
     in
     column
         [ height <| px 900
@@ -754,7 +731,12 @@ viewTable tree =
         , alignTop
         ]
     <|
-        List.map childMap <|
+        List.map
+            (\child ->
+                viewSector child <|
+                    colorCodeConverter (.color <| Tree.label child) alpha
+            )
+        <|
             Tree.children tree
 
 
@@ -831,9 +813,10 @@ viewCell node color =
                 , padding 10
                 , htmlAttribute <| Html.Attributes.id <| String.concat [ "cell-", String.fromInt node.id ]
                 , Event.onLoseFocus <| UpdateFocus { node | status = Selected }
+                , Font.center
                 ]
-                { onChange = \new -> UpdateFocus { node | title = new }
-                , text = node.title
+                { onChange = \new -> UpdateFocus { node | description = new }
+                , text = node.description
                 , placeholder = Just <| Input.placeholder [] <| el [] none
                 , label = Input.labelHidden "Data input"
                 , spellcheck = True
@@ -848,82 +831,35 @@ viewCell node color =
                     Background.color color
                 , Border.width 1
                 , Border.color <| darkGrey 1.0
-                , padding 10
                 , height fill
                 , width fill
                 , htmlAttribute <| Html.Attributes.id <| String.concat [ "cell-", String.fromInt node.id ]
-                , Event.onClick <| ChangeFocus { node | status = Selected }
+                , Event.onClick <|
+                    case node.status of
+                        Selected ->
+                            NoOp
+
+                        _ ->
+                            ChangeFocus { node | status = Selected }
                 , Event.onDoubleClick <| ChangeFocus { node | status = Editing }
                 ]
                 [ paragraph
                     [ width fill
+                    , centerY
                     , Font.center
+                    , paddingEach { top = 10, right = 10, bottom = 1, left = 10 }
                     ]
-                    [ text <| .title node ]
+                    [ text <| .description node ]
                 , paragraph
                     [ alignRight
                     , alignBottom
                     , Font.size 10
                     , Font.color <| darkGrey 1.0
-                    , padding 3
+                    , padding 2
                     ]
-                    [ if List.isEmpty node.content then
-                        none
-
-                      else
-                        List.map .size node.content
-                            |> List.foldl (+) 0
-                            |> Filesize.format
-                            |> text
+                    [ text <| Filesize.format node.size
                     ]
                 ]
-
-
-
--- navigation in breadcrumbs
-
-
-viewPath : List Node -> Element Msg
-viewPath list =
-    row [ width fill ] <| List.map viewNodeinPath list
-
-
-
-{- }
-   viewURL : List Node -> Element Msg
-   viewURL list =
-       case list of
-           x :: xs ->
-               row [] <| [ text <| .cid x ] ++ List.map (\node -> text <| "/" ++ .name node) xs
-
-           [] ->
-               el [] <| text "NO PATH"
--}
-
-
-viewNodeinPath : Node -> Element Msg
-viewNodeinPath node =
-    Input.button
-        [ padding 5
-        , mouseOver <| [ Background.color <| darkGrey 1.0 ]
-        ]
-        { label = text (node.name ++ "(id: " ++ Debug.toString node.id ++ ")/")
-        , onPress = Just <| GetNode node.cid
-        }
-
-
-getPath : Zipper Node -> List Node -> List Node
-getPath zipper acc =
-    let
-        appendLabel =
-            Zipper.label zipper :: acc
-    in
-    case Zipper.parent zipper of
-        Just parent ->
-            getPath parent appendLabel
-
-        Nothing ->
-            appendLabel
 
 
 
@@ -939,6 +875,21 @@ turnToBytesPart message mime json =
         |> Http.bytesPart message mime
 
 
+dagPut : (Result Http.Error a -> Msg) -> Decode.Decoder a -> Encode.Value -> Cmd Msg
+dagPut msg decoder value =
+    Http.request
+        { method = "POST"
+        , url = ipfsApiUrl ++ "dag/put"
+        , headers = []
+        , body =
+            Http.multipartBody
+                [ turnToBytesPart "whatever" "application/json" value ]
+        , expect = Http.expectJson msg decoder
+        , timeout = Nothing
+        , tracker = Just "upload"
+        }
+
+
 addText : String -> Cmd Msg
 addText string =
     let
@@ -952,7 +903,7 @@ addText string =
         , headers = []
         , url = ipfsApiUrl ++ "add"
         , body = Http.multipartBody [ Http.bytesPart "whatever" "text/plain" bytes ]
-        , resolver = Http.stringResolver <| expect linkDecoder
+        , resolver = Http.stringResolver <| expect <| Decode.andThen linkToNodeDecoder <| objLinkDecoder
         , timeout = Nothing
         }
         |> Task.andThen
@@ -961,7 +912,7 @@ addText string =
                     [ { link
                         | mimetype = Mime.parseMimeType "text/plain"
                         , size = Bytes.width bytes
-                        , preview =
+                        , description =
                             if Bytes.width bytes < 5000 then
                                 string
 
@@ -970,33 +921,17 @@ addText string =
                       }
                     ]
             )
-        |> Task.attempt Uploading
+        |> Task.attempt Content
 
 
-getStats : Hash -> Task Http.Error Int
-getStats cid =
+getContent : Hash -> Task Http.Error (List Node)
+getContent cid =
     Http.task
         { method = "GET"
         , headers = []
-        , url = ipfsApiUrl ++ "object/stat?arg=" ++ cid
+        , url = ipfsApiUrl ++ "dag/get?arg=" ++ cid
         , body = Http.emptyBody
-        , resolver = Http.stringResolver <| expect objectStatDecoder
-        , timeout = Nothing
-        }
-        |> Task.andThen
-            (\stat ->
-                Task.succeed stat.cumulativeSize
-            )
-
-
-ipfsRequest : Url -> Method -> Decode.Decoder a -> Task Http.Error a
-ipfsRequest url method decoder =
-    Http.task
-        { method = method
-        , headers = []
-        , body = Http.emptyBody
-        , url = url
-        , resolver = Http.stringResolver <| expect decoder
+        , resolver = Http.stringResolver <| expect contentDecoder
         , timeout = Nothing
         }
 
@@ -1025,93 +960,44 @@ expect decoder response =
                     Err (Http.BadBody (Decode.errorToString err))
 
 
-getData : Node -> Task Http.Error Data
-getData node =
-    let
-        url =
-            ipfsApiUrl ++ "object/get?arg=" ++ node.cid
-    in
-    ipfsRequest url "GET" (Decode.field "Data" Decode.string)
-
-
 getNode : Hash -> Cmd Msg
 getNode cid =
-    getStats cid
-        |> Task.andThen
-            (\size -> Tree.tree { initNode | size = size, cid = cid } [] |> Task.succeed)
-        |> Task.andThen (getTree 2)
-        |> Task.attempt UpdateZipper
-
-
-getChildren : Node -> Task Http.Error (Tree Node)
-getChildren node =
-    let
-        updateTitle =
-            \x data -> Tree.tree { x | title = data } []
-
-        objectGetRequest x =
-            ipfsRequest (ipfsApiUrl ++ "object/get?arg=" ++ x.cid) "GET" objectDecoder
-    in
-    getStats node.cid
-        |> Task.andThen
-            (\size -> Task.succeed { initNode | size = size, cid = node.cid })
-        |> Task.andThen objectGetRequest
-        |> Task.andThen
-            (\object ->
-                object.links
-                    |> List.map
-                        (\link ->
-                            getData link
-                                |> Task.map2 updateTitle (Task.succeed link)
-                        )
-                    |> Task.sequence
-                    |> Task.andThen
-                        (\links_list ->
-                            Task.succeed <| Tree.tree { node | title = object.data } links_list
-                        )
-            )
-
-
-getTree : Int -> Tree Node -> Task Http.Error (Tree Node)
-getTree depth tree =
-    if depth == 0 then
-        Task.succeed tree
-
-    else
-        Tree.label tree
-            |> getChildren
-            |> Task.andThen
-                (\x ->
-                    Tree.children x
-                        |> List.map
-                            (\child ->
-                                getChildren (Tree.label child)
-                                    |> Task.andThen (getTree (depth - 1))
-                            )
-                        |> Task.sequence
-                )
-            |> Task.andThen (\list -> Task.succeed <| Tree.replaceChildren list tree)
+    Http.get
+        { url = ipfsApiUrl ++ "dag/get?arg=" ++ cid
+        , expect = Http.expectJson UpdateZipper treeDecoder
+        }
 
 
 
 -- DECODERS
 
 
+treeDecoder : Decode.Decoder (Tree Node)
+treeDecoder =
+    Decode.map2 Tree.tree nodeDecoder linksDecoder
+
+
 nodeDecoder : Decode.Decoder Node
 nodeDecoder =
     Decode.succeed Node
-        |> required "Name" Decode.string
-        |> required "Hash" Decode.string
-        |> required "Size" Decode.int
-        |> optional "Title" Decode.string ""
-        |> hardcoded Completed
         |> hardcoded 0
-        |> hardcoded []
+        |> hardcoded Completed
+        |> required "name" Decode.string
+        |> required "cid" Decode.string
+        |> optional "size" sizeDecoder 0
+        |> optional "description" Decode.string ""
+        |> optional "mimetype" (Decode.map Mime.parseMimeType Decode.string) Nothing
+        |> optional "color" Decode.int 0
 
 
-mtypeDecoder : Decode.Decoder (Maybe Mime.MimeType)
-mtypeDecoder =
-    Decode.map Mime.parseMimeType (Decode.field "type" Decode.string)
+linksDecoder : Decode.Decoder (List (Tree Node))
+linksDecoder =
+    Decode.field "links" (Decode.lazy (\_ -> Decode.list treeDecoder))
+
+
+contentDecoder : Decode.Decoder (List Node)
+contentDecoder =
+    Decode.list nodeDecoder
 
 
 sizeDecoder : Decode.Decoder Int
@@ -1119,16 +1005,35 @@ sizeDecoder =
     Decode.oneOf [ Decode.int, DecodeExtra.parseInt ]
 
 
-linkDecoder : Decode.Decoder Link
-linkDecoder =
-    Decode.succeed Link
-        |> optional "Name" Decode.string ""
-        |> required "Hash" Decode.string
-        |> optional "Size" sizeDecoder 0
-        |> optional "MimeType" mtypeDecoder Nothing
-        |> optional "Preview" Decode.string ""
+linkToNodeDecoder : Link -> Decode.Decoder Node
+linkToNodeDecoder link =
+    Decode.succeed Node
         |> hardcoded 0
         |> hardcoded Completed
+        |> hardcoded link.name
+        |> hardcoded link.hash
+        |> hardcoded link.size
+        |> optional "description" Decode.string ""
+        |> optional "mimetype" (Decode.map Mime.parseMimeType Decode.string) Nothing
+        |> optional "color" Decode.int 0
+
+
+objLinkDecoder : Decode.Decoder Link
+objLinkDecoder =
+    Decode.succeed Link
+        |> required "Name" Decode.string
+        |> required "Hash" Decode.string
+        |> required "Size" sizeDecoder
+
+
+ipfsNodeID : Decode.Decoder IpfsNodeID
+ipfsNodeID =
+    Decode.succeed IpfsNodeID
+        |> required "ID" Decode.string
+        |> required "PublicKey" Decode.string
+        |> required "Addresses" (Decode.list Decode.string)
+        |> required "AgentVersion" Decode.string
+        |> required "ProtocolVersion" Decode.string
 
 
 objectDecoder : Decode.Decoder Object
@@ -1138,20 +1043,42 @@ objectDecoder =
         |> required "Data" Decode.string
 
 
-objectStatDecoder : Decode.Decoder ObjectStat
-objectStatDecoder =
-    Decode.succeed ObjectStat
-        |> required "Hash" Decode.string
-        |> required "NumLinks" Decode.int
-        |> required "BlockSize" Decode.int
-        |> required "LinksSize" Decode.int
-        |> required "DataSize" Decode.int
-        |> required "CumulativeSize" Decode.int
+
+-- decode answer of dag put request
 
 
 cidDecoder : Decode.Decoder Hash
 cidDecoder =
     Decode.at [ "Cid", "/" ] Decode.string
+
+
+colorCodeConverter : Int -> Float -> Color
+colorCodeConverter i alpha =
+    let
+        color =
+            case i of
+                0 ->
+                    yellow
+
+                1 ->
+                    orange
+
+                2 ->
+                    violet
+
+                3 ->
+                    blue
+
+                4 ->
+                    cyan
+
+                5 ->
+                    green
+
+                _ ->
+                    white
+    in
+    color alpha
 
 
 
@@ -1165,11 +1092,11 @@ treeEncoder i tree =
             Tree.label tree
     in
     Encode.object <|
-        [ ( "title", Encode.string node.title )
+        [ ( "description", Encode.string node.description )
+        , ( "size", Encode.int node.size )
         , ( "cid", Encode.string node.cid )
         , ( "name", Encode.string node.name )
         , ( "links", Encode.list (treeEncoder (i + 1)) <| Tree.children tree )
-        , ( "content", Encode.list contentEncoder node.content )
         ]
             ++ (if i == 1 then
                     [ ( "color", Encode.int <| Maybe.withDefault 9 <| String.toInt <| node.name ) ]
@@ -1179,31 +1106,14 @@ treeEncoder i tree =
                )
 
 
-contentEncoder : Link -> Value
-contentEncoder link =
+contentEncoder : Node -> Value
+contentEncoder node =
     Encode.object
-        [ ( "Name", Encode.string link.name )
-        , ( "Size", Encode.int link.size )
-        , ( "Hash", Encode.string link.cid )
-        , ( "MimeType", Encode.string <| Mime.toString <| Maybe.withDefault (Mime.OtherMimeType "") link.mimetype )
-        , ( "Preview", Encode.string link.preview )
-        ]
-
-
-objectEncoder : Data -> List Node -> Value
-objectEncoder data list =
-    Encode.object
-        [ ( "Data", Encode.string data )
-        , ( "Links", Encode.list linkEncoder list )
-        ]
-
-
-linkEncoder : Node -> Value
-linkEncoder node =
-    Encode.object
-        [ ( "Name", Encode.string node.name )
-        , ( "Size", Encode.int node.size )
-        , ( "Hash", Encode.string node.cid )
+        [ ( "name", Encode.string node.name )
+        , ( "size", Encode.int node.size )
+        , ( "cid", Encode.string node.cid )
+        , ( "mimetype", Encode.string <| Mime.toString <| Maybe.withDefault (Mime.OtherMimeType "") node.mimetype )
+        , ( "description", Encode.string node.description )
         ]
 
 
@@ -1259,83 +1169,252 @@ darkGrey alpha =
 
 
 {- }
-   dataDecoder : Decode.Decoder String
-   dataDecoder =
-       Decode.field "Data" Decode.string
 
-   treeDecoder : Decode.Decoder (Tree Node)
-   treeDecoder =
-           Decode.map2 Tree.tree
-               (Decode.field "Data" Decode.string)
-               (Decode.field "Links" (Decode.map ))
-           Decode.map2 Node
-                   (Decode.field "value" nodeDecoder)
-                   (Decode.field "children" (Decode.lazy (\_ -> decoder nodeDecoder |> Decode.list)))
-               ]
 
-   onlyHashDecoder : Decode.Decoder Hash
-   onlyHashDecoder =
-       Decode.field "Hash" Decode.string
+   ipfsRequest : Url -> String -> Decode.Decoder a -> Task Http.Error a
+   ipfsRequest url method decoder =
+       Http.task
+           { method = method
+           , headers = []
+           , body = Http.emptyBody
+           , url = url
+           , resolver = Http.stringResolver <| expect decoder
+           , timeout = Nothing
+           }
 
-   objectModifiedDecoder : Decode.Decoder ModifiedObject
-   objectModifiedDecoder =
-       Decode.succeed ModifiedObject
-           |> required "Hash" Decode.string
-           |> required "Links" (Decode.list linkDecoder)
+
+   -- navigation in breadcrumbs
+
+
+   viewPath : List Node -> Element Msg
+   viewPath list =
+       row [ width fill ] <| List.map viewNodeinPath list
 
 
 
-      -- BUNCH OF REQUESTS FOR ADDING FILES
-      -- [ add files, patch current node, patch path, patch root node ]
+   {- }
+      viewURL : List Node -> Element Msg
+      viewURL list =
+          case list of
+              x :: xs ->
+                  row [] <| [ text <| .cid x ] ++ List.map (\node -> text <| "/" ++ .name node) xs
 
-
-         addLink : Hash -> String -> Hash -> Task.Task Http.Error Hash
-         addLink parent name cid =
-             Http.get ( ipfsApiUrl
-                             ++ "object/patch/add-link?arg=" ++ parent
-                             ++ "&arg=" ++ name
-                             ++ "&arg=" ++ cid )
-                         (Decode.field "Hash" Decode.string)
-                         |> Http.toTask
-
-
-         patchObject : Node -> Hash -> Task.Task Http.Error Hash
-         patchObject node new_cid =
-             case node.parent of
-                 Just parent ->
-                     addLink parent.cid node.name new_cid
-                         |> Task.andThen (\hash -> patchObject parent hash)
-                 Nothing ->
-                     Task.succeed node.cid
-
-
-      addFileRequest : NativeFile -> Task.Task Http.Error Link
-      addFileRequest nf =
-          let
-              body =
-                  Http.multipartBody [ FileReader.filePart nf.name nf ]
-          in
-              Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
-                  |> Http.toTask
-
-
-      addFiles : List NativeFile -> Cmd Msg
-      addFiles nf_list =
-          (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
-              |> Task.attempt DraftUpdate
-
-
-      patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
-      patchPath acc path hash =
-          case path of
-              (childname, childhash) :: (parentname, parenthash) :: xs ->
-                  addLink parenthash
-                      { name = childname, size = 0, cid = hash, title = 2, status = Completed }
-                      |> Task.andThen
-                          (\hash ->
-                              patchPath (acc ++ [(parentname, hash)]) ((parentname, parenthash) :: xs) hash )
-              x :: [] ->
-                  Task.succeed acc
               [] ->
-                  Task.succeed acc
+                  el [] <| text "NO PATH"
+   -}
+
+
+   viewNodeinPath : Node -> Element Msg
+   viewNodeinPath node =
+       Input.button
+           [ padding 5
+           , mouseOver <| [ Background.color <| darkGrey 1.0 ]
+           ]
+           { label = text (node.name ++ "(id: " ++ Debug.toString node.id ++ ")/")
+           , onPress = Just <| GetNode node.cid
+           }
+
+
+   getPath : Zipper Node -> List Node -> List Node
+   getPath zipper acc =
+       let
+           appendLabel =
+               Zipper.label zipper :: acc
+       in
+       case Zipper.parent zipper of
+           Just parent ->
+               getPath parent appendLabel
+
+           Nothing ->
+               appendLabel
+
+
+
+   objectStatDecoder : Decode.Decoder ObjectStat
+   objectStatDecoder =
+       Decode.succeed ObjectStat
+           |> required "Hash" Decode.string
+           |> required "NumLinks" Decode.int
+           |> required "BlockSize" Decode.int
+           |> required "LinksSize" Decode.int
+           |> required "DataSize" Decode.int
+           |> required "CumulativeSize" Decode.int
+
+
+   objectEncoder : String -> List Node -> Value
+   objectEncoder data list =
+       Encode.object
+           [ ( "Data", Encode.string data )
+           , ( "Links", Encode.list linkEncoder list )
+           ]
+
+
+   linkEncoder : Node -> Value
+   linkEncoder node =
+       Encode.object
+           [ ( "Name", Encode.string node.name )
+           , ( "Size", Encode.int node.size )
+           , ( "Hash", Encode.string node.cid )
+           ]
+
+
+   getStats : Hash -> Task Http.Error Int
+   getStats cid =
+       Http.task
+           { method = "GET"
+           , headers = []
+           , url = ipfsApiUrl ++ "object/stat?arg=" ++ cid
+           , body = Http.emptyBody
+           , resolver = Http.stringResolver <| expect objectStatDecoder
+           , timeout = Nothing
+           }
+           |> Task.andThen
+               (\stat ->
+                   Task.succeed stat.cumulativeSize
+               )
+
+
+   getData : Node -> Task Http.Error String
+   getData node =
+       let
+           url =
+               ipfsApiUrl ++ "object/get?arg=" ++ node.cid
+       in
+       ipfsRequest url "GET" (Decode.field "Data" Decode.string)
+
+
+
+
+   getChildren : Node -> Task Http.Error (Tree Node)
+   getChildren node =
+       let
+           updatedescription =
+               \x data -> Tree.tree { x | description = data } []
+
+           objectGetRequest x =
+               ipfsRequest (ipfsApiUrl ++ "object/get?arg=" ++ x.cid) "GET" objectDecoder
+       in
+       getStats node.cid
+           |> Task.andThen
+               (\size -> Task.succeed { initNode | size = size, cid = node.cid })
+           |> Task.andThen objectGetRequest
+           |> Task.andThen
+               (\object ->
+                   object.links
+                       |> List.map
+                           (\link ->
+                               getData link
+                                   |> Task.map2 updatedescription (Task.succeed link)
+                           )
+                       |> Task.sequence
+                       |> Task.andThen
+                           (\links_list ->
+                               Task.succeed <| Tree.tree { node | description = object.data } links_list
+                           )
+               )
+
+
+   getTree : Int -> Tree Node -> Task Http.Error (Tree Node)
+   getTree depth tree =
+       if depth == 0 then
+           Task.succeed tree
+
+       else
+           Tree.label tree
+               |> getChildren
+               |> Task.andThen
+                   (\x ->
+                       Tree.children x
+                           |> List.map
+                               (\child ->
+                                   getChildren (Tree.label child)
+                                       |> Task.andThen (getTree (depth - 1))
+                               )
+                           |> Task.sequence
+                   )
+               |> Task.andThen (\list -> Task.succeed <| Tree.replaceChildren list tree)
+
+
+
+
+
+      dataDecoder : Decode.Decoder String
+      dataDecoder =
+          Decode.field "Data" Decode.string
+
+      treeDecoder : Decode.Decoder (Tree Node)
+      treeDecoder =
+              Decode.map2 Tree.tree
+                  (Decode.field "Data" Decode.string)
+                  (Decode.field "Links" (Decode.map ))
+              Decode.map2 Node
+                      (Decode.field "value" nodeDecoder)
+                      (Decode.field "children" (Decode.lazy (\_ -> decoder nodeDecoder |> Decode.list)))
+                  ]
+
+      onlyHashDecoder : Decode.Decoder Hash
+      onlyHashDecoder =
+          Decode.field "Hash" Decode.string
+
+      objectModifiedDecoder : Decode.Decoder ModifiedObject
+      objectModifiedDecoder =
+          Decode.succeed ModifiedObject
+              |> required "Hash" Decode.string
+              |> required "Links" (Decode.list linkDecoder)
+
+
+
+         -- BUNCH OF REQUESTS FOR ADDING FILES
+         -- [ add files, patch current node, patch path, patch root node ]
+
+
+            addLink : Hash -> String -> Hash -> Task.Task Http.Error Hash
+            addLink parent name cid =
+                Http.get ( ipfsApiUrl
+                                ++ "object/patch/add-link?arg=" ++ parent
+                                ++ "&arg=" ++ name
+                                ++ "&arg=" ++ cid )
+                            (Decode.field "Hash" Decode.string)
+                            |> Http.toTask
+
+
+            patchObject : Node -> Hash -> Task.Task Http.Error Hash
+            patchObject node new_cid =
+                case node.parent of
+                    Just parent ->
+                        addLink parent.cid node.name new_cid
+                            |> Task.andThen (\hash -> patchObject parent hash)
+                    Nothing ->
+                        Task.succeed node.cid
+
+
+         addFileRequest : NativeFile -> Task.Task Http.Error Link
+         addFileRequest nf =
+             let
+                 body =
+                     Http.multipartBody [ FileReader.filePart nf.name nf ]
+             in
+                 Http.post (ipfsApiUrl ++ "add") body fileLinkDecoder
+                     |> Http.toTask
+
+
+         addFiles : List NativeFile -> Cmd Msg
+         addFiles nf_list =
+             (List.map (\file -> addFileRequest file) nf_list |> Task.sequence)
+                 |> Task.attempt DraftUpdate
+
+
+         patchPath : Path -> Path -> Hash -> Task.Task Http.Error Path
+         patchPath acc path hash =
+             case path of
+                 (childname, childhash) :: (parentname, parenthash) :: xs ->
+                     addLink parenthash
+                         { name = childname, size = 0, cid = hash, title = 2, status = Completed }
+                         |> Task.andThen
+                             (\hash ->
+                                 patchPath (acc ++ [(parentname, hash)]) ((parentname, parenthash) :: xs) hash )
+                 x :: [] ->
+                     Task.succeed acc
+                 [] ->
+                     Task.succeed acc
 -}
